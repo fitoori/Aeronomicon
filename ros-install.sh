@@ -67,3 +67,23 @@ fi
 
 echo "ROS 2 Humble installation complete."
 
+cd ~/
+
+# Install realsense-ros package
+
+echo "Now installing realsense-ros..."
+mkdir -p ~/src
+cd ~/src
+git clone https://github.com/IntelRealSense/realsense-ros.git
+cd realsense-ros
+# git checkout 2.3.1
+cp -r ./launch ~/ros2_ws/src/realsense-ros/
+
+# Build the realsense-ros package
+cd ~/ros2_ws
+colcon build --symlink-install --packages-select realsense_ros
+
+echo "RealSense ROS installation complete."
+
+
+
