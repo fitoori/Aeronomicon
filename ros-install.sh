@@ -8,6 +8,12 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Prompt for installation options
+echo "ROS 2 Installation Options:"
+echo "1. Build from source"
+echo "2. Install pre-built binaries"
+read -p "Enter your choice (1 or 2): " choice
+
 # Add the ROS 2 apt repository
 sh -c 'echo "deb http://packages.ros.org/ros2/ubuntu bullseye main" > /etc/apt/sources.list.d/ros2.list'
 
@@ -19,22 +25,14 @@ apt update
 
 # Install ROS 2 packages using aptitude
 apt-get install -y aptitude
-aptitude install -y ros-foxy-desktop
-
-# Set up the ROS 2 environment
-source /opt/ros/foxy/setup.bash
-
-# Install additional dependencies
-aptitude install -y python3-argcomplete python3-colcon-common-extensions python3-vcstool
-
-# Initialize rosdep
-rosdep init
-rosdep update
 
 # Option 1: Build ROS 2 from source
-build_from_source() {
+if [ "$choice" -eq 1 ]; then
   # Install build tools
   aptitude install -y build-essential cmake git
+
+  # Install additional dependencies for building from source
+  aptitude install -y python3-argcomplete python3-colcon-common-extensions python3-vcstool
 
   # Create the workspace
   mkdir -p ~/ros2_ws/src
@@ -46,7 +44,10 @@ build_from_source() {
   rm foxy.zip
   mv ros2-foxy/* src/
 
-  # Install additional dependencies for building from source
+  # Resolve dependencies
+  aptitude install -y python3-rosdep
+  rosdep init
+  rosdep update
   rosdep install --from-paths src --ignore-src --rosdistro foxy -y
 
   # Build ROS 2
@@ -55,12 +56,14 @@ build_from_source() {
   # Source the ROS 2 workspace
   echo "source ~/ros2_ws/install/setup.bash" >> ~/.bashrc
   source ~/.bashrc
-}
 
-# Option 2: Install pre-built binaries using aptitude (comment out Option 1 above)
-#aptitude install -y ros-foxy-desktop
+# Option 2: Install pre-built binaries using aptitude
+elif [ "$choice" -eq 2 ]; then
+  aptitude install -y ros-foxy-desktop
 
-# Choose the installation option (1 or 2)
-build_from_source
+  # Set up the ROS 2 environment
+  source /opt/ros/foxy/setup.bash
+fi
 
 echo "ROS 2 Humble installation complete."
+
