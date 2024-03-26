@@ -1,3 +1,5 @@
+## ONICS - Optical Navigation and Interference Control System
+
 import os
 import threading
 import subprocess
