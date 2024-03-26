@@ -1,178 +1,108 @@
 ## ONICS - Optical Navigation and Interference Control System
 
-import os
-import threading
 import subprocess
-import time
-import psutil  # For monitoring CPU and RAM usage
+import threading
 import logging
-import signal
-import sys
+import time
 
-# Global variables
-onics_dir = "/home/pi/ONICS/"
+# Configure logging
+logging.basicConfig(filename='/home/pi/ONICS/onics.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Define variables
 connection_in_port = "127.0.0.1:14550"
 connection_in_baud = "921600"
-connection_out_p01 = "127.0.0.1:14540"  # T265
-connection_out_p02 = "127.0.0.1:14560"  # D435i
+connection_out_p01 = "127.0.0.1:14540"      # T265
+connection_out_p02 = "127.0.0.1:14560"      # D435i
 connection_out_p03 = "/dev/ttyUSB0"  # SiK Radio
 
-# Retry variables
-max_retry_attempts_t265 = 3
-max_retry_attempts_d4xx = 5
-max_retry_attempts_control = 2
+t265_enabled = True
+d435i_enabled = True
 
-# Log file path
-log_file_path = os.path.join(onics_dir, "onics.log")
-
-# Sleep intervals (in seconds)
-initial_retry_interval = 5
-max_retry_interval = 300  # 5 minutes
-cpu_monitor_interval = 3600  # 1 hour
-termination_poll_interval = 1  # 1 second
-
-# Initialize logger
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-console = logging.StreamHandler()
-console.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-console.setFormatter(formatter)
-logging.getLogger('').addHandler(console)
-
-# Function to monitor CPU temperature, CPU load, and RAM usage
-def monitor_system():
-    while not exit_event.is_set():
-        try:
-            cpu_temp = psutil.sensors_temperatures().get("cpu_thermal", [None])[0].current if psutil.sensors_temperatures().get("cpu_thermal") else None
-            cpu_load = psutil.cpu_percent()
-            ram_usage = psutil.virtual_memory().percent
-            logging.info(f"CPU Temp: {cpu_temp}°C, CPU Load: {cpu_load}%, RAM Usage: {ram_usage}%")
-            time.sleep(cpu_monitor_interval)
-        except Exception as e:
-            logging.error(f"Error in monitor_system: {e}")
-
-# Function to run subprocess with timeout
-def run_subprocess_with_timeout(command, timeout):
+# Function to check if a RealSense device is connected
+def is_device_connected(device_name):
     try:
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
-        timer = threading.Timer(timeout, lambda: os.killpg(os.getpgid(process.pid), signal.SIGTERM))
-        timer.start()
-        stdout, stderr = process.communicate()
-        timer.cancel()
-        return process.returncode, stdout.decode(), stderr.decode()
-    except Exception as e:
-        logging.error(f"Error in run_subprocess_with_timeout: {e}")
-        return -1, "", ""
+        result = subprocess.run(["rs-enumerate-devices"], capture_output=True, text=True)
+        return device_name in result.stdout
+    except subprocess.CalledProcessError as e:
+        logging.error("Error checking for RealSense devices: %s", e)
+        return False
 
-# Function to run MAVProxy connection
+# Function to run mavproxy
 def mavproxy_create_connection():
     try:
-        logging.info("Starting MAVProxy connection")
-        command = f"mavproxy.py --master={connection_in_port} --baudrate={connection_in_baud} --out udp:{connection_out_p01} --out udp:{connection_out_p02} --out={connection_out_p03}"
-        returncode, _, stderr = run_subprocess_with_timeout(command, 60)
-        if returncode == 0:
-            logging.info("MAVProxy connection started successfully")
-        else:
-            logging.error(f"Failed to start MAVProxy connection: {stderr}")
-    except Exception as e:
-        logging.error(f"Error in mavproxy_create_connection: {e}")
+        subprocess.run(["mavproxy.py",
+                        "--master=" + connection_in_port,
+                        "--baudrate=" + connection_in_baud,
+                        "--out", "udp:" + connection_out_p01,
+                        "--out", "udp:" + connection_out_p02,
+                        "--out", connection_out_p03], check=True, cwd="/home/pi/ONICS/")
+    except subprocess.CalledProcessError as e:
+        logging.error("mavproxy error: %s", e)
 
 # Function to run T265 script
 def run_t265():
-    retry_attempts = 0
-    while retry_attempts < max_retry_attempts_t265 or max_retry_attempts_t265 == 0:
-        try:
-            logging.info("Starting T265 script")
-            command = ["python3", os.path.join(onics_dir, "t265_precland_apriltags.py"), "--connect=" + connection_out_p01]
-            returncode, _, stderr = run_subprocess_with_timeout(command, 120)
-            if returncode == 0:
-                logging.info("T265 script exited normally")
-                return
-            else:
-                logging.warning(f"T265 script exited with error: {stderr}")
-        except Exception as e:
-            logging.error(f"Error in run_t265: {e}")
-        retry_attempts += 1
-        time.sleep(initial_retry_interval)
+    global t265_enabled
+    while t265_enabled:
+        if is_device_connected("T265"):
+            try:
+                subprocess.run(["python3", "t265_precland_apriltags.py", "--connect=" + connection_out_p01], check=True, cwd="/home/pi/ONICS/")
+            except subprocess.CalledProcessError as e:
+                logging.error("T265 script error: %s", e)
+        else:
+            logging.warning("T265 device not detected. Skipping T265 script.")
+            t265_enabled = False
+            break
 
 # Function to run D435i script
-def run_d4xx():
-    retry_attempts = 0
-    while retry_attempts < max_retry_attempts_d4xx or max_retry_attempts_d4xx == 0:
-        try:
-            logging.info("Starting D435i script")
-            command = ["python3", os.path.join(onics_dir, "d4xx_to_mavlink.py"), "--connect=" + connection_out_p02]
-            returncode, _, stderr = run_subprocess_with_timeout(command, 120)
-            if returncode == 0:
-                logging.info("D435i script exited normally")
-                return
+def run_d435i():
+    global d435i_enabled
+    while d435i_enabled:
+        if is_device_connected("D435i"):
+            try:
+                subprocess.run(["python3", "d4xx_to_mavlink.py", "--connect=" + connection_out_p02], check=True, cwd="/home/pi/ONICS/")
+            except subprocess.CalledProcessError as e:
+                logging.error("D435i script error: %s", e)
+        else:
+            logging.warning("D435i device not detected. Skipping D435i script.")
+            d435i_enabled = False
+            break
+
+# Function to continuously publish logs to shell
+def publish_logs():
+    with open('/home/pi/ONICS/onics.log', 'r') as logfile:
+        while True:
+            line = logfile.readline()
+            if line:
+                print(line.strip())
             else:
-                logging.warning(f"D435i script exited with error: {stderr}")
-        except Exception as e:
-            logging.error(f"Error in run_d4xx: {e}")
-        retry_attempts += 1
-        time.sleep(initial_retry_interval)
+                time.sleep(1)
 
-# Function to run control script
-def run_control():
-    retry_attempts = 0
-    while retry_attempts < max_retry_attempts_control or max_retry_attempts_control == 0:
-        try:
-            logging.info("Starting control script")
-            command = ["python3", os.path.join(onics_dir, "mavlink_control.py"), "--connect=" + connection_out_p03]
-            returncode, _, stderr = run_subprocess_with_timeout(command, 120)
-            if returncode == 0:
-                logging.info("Control script exited normally")
-                return
-            else:
-                logging.warning(f"Control script exited with error: {stderr}")
-        except Exception as e:
-            logging.error(f"Error in run_control: {e}")
-        retry_attempts += 1
-        time.sleep(initial_retry_interval)
+# Start log publishing thread
+log_thread = threading.Thread(target=publish_logs)
+log_thread.start()
 
-# Main function
-def main():
-    try:
-        logging.info("Service started")
-        global exit_event
-        exit_event = threading.Event()
+# Output initializing message to console
+print("ONICS - Optical Navigation and Interference Control System is initializing...")
 
-        # Start system monitoring thread
-        system_monitor_thread = threading.Thread(target=monitor_system)
-        system_monitor_thread.start()
+# Start threads for running scripts
+thread1 = threading.Thread(target=mavproxy_create_connection)
+thread1.start()
 
-        # Start MAVProxy connection thread
-        mavproxy_thread = threading.Thread(target=mavproxy_create_connection)
-        mavproxy_thread.start()
+thread2 = threading.Thread(target=run_t265)
+thread2.start()
 
-        # Start T265 script thread
-        t265_thread = threading.Thread(target=run_t265)
-        t265_thread.start()
+thread3 = threading.Thread(target=run_d435i)
+thread3.start()
 
-        # Start D435i script thread
-        d4xx_thread = threading.Thread(target=run_d4xx)
-        d4xx_thread.start()
-
-        # Start control script thread
-        control_thread = threading.Thread(target=run_control)
-        control_thread.start()
-
-        # Wait for exit signal
-        signal.signal(signal.SIGINT, lambda signal, frame: exit_event.set())
-        signal.signal(signal.SIGTERM, lambda signal, frame: exit_event.set())
-        while not exit_event.is_set():
-            time.sleep(termination_poll_interval)
-
-        # Clean up and join threads
-        system_monitor_thread.join()
-        mavproxy_thread.join()
-        t265_thread.join()
-        d4xx_thread.join()
-        control_thread.join()
-
-    except Exception as e:
-        logging.error(f"Error in main: {e}")
-
-if __name__ == "__main__":
-    main()
+# Restart threads if they exit
+while True:
+    if not thread1.is_alive():
+        thread1 = threading.Thread(target=mavproxy_create_connection)
+        thread1.start()
+    if not thread2.is_alive() and t265_enabled:
+        thread2 = threading.Thread(target=run_t265)
+        thread2.start()
+    if not thread3.is_alive() and d435i_enabled:
+        thread3 = threading.Thread(target=run_d435i)
+        thread3.start()
+    time.sleep(1)
