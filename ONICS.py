@@ -1,4 +1,6 @@
-## ONICS - Optical Navigation and Interference Control System
+##################################################################
+##  ONICS - Optical Navigation and Interference Control System  ##
+##################################################################
 
 import subprocess
 import threading
@@ -11,9 +13,9 @@ logging.basicConfig(filename='/home/pi/ONICS/onics.log', level=logging.INFO, for
 # Define variables
 connection_in_port = "127.0.0.1:14550"
 connection_in_baud = "921600"
-connection_out_p01 = "127.0.0.1:14540"      # T265
-connection_out_p02 = "127.0.0.1:14560"      # D435i
-connection_out_p03 = "/dev/ttyUSB0"  # SiK Radio
+connection_out_p01 = "127.0.0.1:14540"  # T265
+connection_out_p02 = "127.0.0.1:14560"  # D435i
+connection_out_p03 = "/dev/ttyUSB0"     # SiK Radio
 
 t265_enabled = True
 d435i_enabled = True
