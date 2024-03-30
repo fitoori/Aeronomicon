@@ -1,5 +1,10 @@
 #!/bin/bash
 
+####################################
+##           Hall Monitor         ##
+## Enthusiastic Service Restarter ##
+####################################
+
 SERVICE_NAME="unreliable_service"
 DELAY=10
 
