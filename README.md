@@ -6,3 +6,5 @@ List of files:
 - hall-monitor.sh - restarts any one service when it crashes.
 - apriltags3.py - unmodified fork of the original work kept here as a dependency for t265_precland_apriltag.py
 - t265_precland_apriltag.py - Optimized fork of Thien94's script of the same name. [Currently Untested]
+- d4xx_to_mavlink.py - Optimized fork of Thien94's script of the same name. [Currently Untested]
+- d435i_to_mavlink.py - Optimized fork of Thien94's D4xx_to_mavlink.py script with added support for the D435i's built-in IMU. [Currently Untested]
