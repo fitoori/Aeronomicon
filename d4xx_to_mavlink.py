@@ -4,9 +4,8 @@
 ##          librealsense D4xx to MAVLink            ##
 ######################################################
 
-# Set the path for pyrealsense2.[].so
-# Otherwise, place the pyrealsense2.[].so file under the same directory as this script or modify PYTHONPATH
-
+# WARNING: Enabling RTSP may cause unresponsiveness. 
+# It is inadvisable to try and stream video from the device while it is acting as an obstacle detector.
 
 import sys
 import os
@@ -43,7 +42,7 @@ obstacle_line_height_ratio = 0.18
 obstacle_line_thickness_pixel = 10
 USE_PRESET_FILE = True
 PRESET_FILE = "../cfg/d4xx-default.json"
-RTSP_STREAMING_ENABLE = True
+RTSP_STREAMING_ENABLE = False
 RTSP_PORT = "8554"
 RTSP_MOUNT_POINT = "/d4xx"
 filters = [
