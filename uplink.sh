@@ -1,17 +1,13 @@
 #!/bin/bash
 
-DEFAULT_LOG_FILE="/home/pi/uplink.log"
-DEFAULT_PING_TARGET="sixfab.com"
+LOG_FILE="/home/pi/uplink.log"
+PING_TARGET="sixfab.com"
 WWAN_INTERFACE="wwan0"
 PING_INTERVAL=300  # 5 minutes
 RETRY_INTERVAL=60
 RETRY_ON_FAILURE=true
 MAX_RETRIES=3
 APN="hologram"
-
-# Set default values
-LOG_FILE="$DEFAULT_LOG_FILE"
-PING_TARGET="$DEFAULT_PING_TARGET"
 
 # Schedule daily reboot at 01:00
 sudo shutdown -r 01:00
@@ -23,15 +19,12 @@ function log() {
 function check_connection() {
     local packet_loss=$(ping -I "$WWAN_INTERFACE" -c 3 -W 3 "$PING_TARGET" | grep -oP '\d+(?=% packet loss)' || echo "Error")
 
-    if [[ "$packet_loss" == "Error" ]]; then
-        log "Failed to parse packet loss. Connection check failed."
+    if [[ "$packet_loss" == "Error" || "$packet_loss" -ge 100 ]]; then
+        log "Connection check failed. Packet loss: ${packet_loss:-Unknown}%"
         return 1
-    elif [[ "$packet_loss" -lt 100 ]]; then
-        log "Received response from ping. Packet loss: $packet_loss%"
-        return 0  # Connection is successful
     else
-        log "No response from ping. Packet loss: $packet_loss%"
-        return 1  # Connection failed
+        log "Received response from ping. Packet loss: $packet_loss%"
+        return 0
     fi
 }
 
