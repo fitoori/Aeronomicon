@@ -3,13 +3,15 @@
 ##################################################################
 ##  ONICS - Optical Navigation and Interference Control System  ##
 ##################################################################
+
 import subprocess
 import threading
 import logging
 import time
 import os
+import argparse
 
-# Define log file path (change this path as needed)
+# Default log file path
 log_file_path = "/home/pi/onics.log"
 
 # Configure logging
@@ -31,12 +33,35 @@ def is_device_connected(device_prefix):
         result = subprocess.run(["rs-enumerate-devices"], capture_output=True, text=True)
         lines = result.stdout.splitlines()
         for line in lines:
-            if line.startswith(device_prefix):
+            if device_prefix in line:
                 return True
         return False
     except subprocess.CalledProcessError as e:
         logging.error("Error checking for RealSense devices: %s", e)
         return False
+
+# Function to enumerate and list relevant RealSense devices
+def enumerate_devices():
+    relevant_devices = ["T265", "D4"]  # Relevant RealSense device prefixes
+    detected_devices = []
+
+    try:
+        result = subprocess.run(["rs-enumerate-devices"], capture_output=True, text=True)
+        lines = result.stdout.splitlines()
+        for line in lines:
+            for device_prefix in relevant_devices:
+                if device_prefix in line:
+                    detected_devices.append(line.strip())
+                    break
+    except subprocess.CalledProcessError as e:
+        logging.error("Error enumerating RealSense devices: %s", e)
+
+    if detected_devices:
+        print("Detected RealSense Devices:")
+        for device in detected_devices:
+            print(device)
+    else:
+        print("No relevant RealSense devices detected.")
 
 # Function to run mavproxy
 def mavproxy_create_connection():
@@ -49,17 +74,6 @@ def mavproxy_create_connection():
                         "--out", connection_out_p03], check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
     except subprocess.CalledProcessError as e:
         logging.error("mavproxy error: %s", e)
-
-# Function to run a specific script
-def run_script(script_name, args):
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script_name)
-    if os.path.exists(script_path):
-        try:
-            subprocess.run(["python3", script_name] + args, check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
-        except subprocess.CalledProcessError as e:
-            logging.error(f"{script_name} script error: {e}")
-    else:
-        logging.warning(f"{script_name} script not found.")
 
 # Function to run RealSense D4XX scripts
 def run_d4xx():
@@ -100,28 +114,37 @@ def publish_logs():
             else:
                 time.sleep(1)  # Sleep briefly if no new log lines are available
 
-# Start log publishing thread
-log_thread = threading.Thread(target=publish_logs)
-log_thread.start()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="ONICS - Optical Navigation and Interference Control System")
+    parser.add_argument("-e", "--enumerate", action="store_true", help="Enumerate detected RealSense devices")
 
-# Output initializing message to console
-print("ONICS - Optical Navigation and Interference Control System is initializing...")
+    args = parser.parse_args()
 
-# Start threads for running scripts
-thread1 = threading.Thread(target=mavproxy_create_connection)
-thread1.start()
+    if args.enumerate:
+        enumerate_devices()
+    else:
+        # Start log publishing thread
+        log_thread = threading.Thread(target=publish_logs)
+        log_thread.start()
 
-thread2 = threading.Thread(target=run_t265)
-thread2.start()
+        # Output initializing message to console
+        print("ONICS - Optical Navigation and Interference Control System is initializing...")
 
-thread3 = threading.Thread(target=run_d4xx)
-thread3.start()
+        # Start threads for running scripts
+        thread1 = threading.Thread(target=mavproxy_create_connection)
+        thread1.start()
 
-# Restart threads if they exit
-while True:
-    threads = [(thread1, mavproxy_create_connection), (thread2, run_t265), (thread3, run_d4xx)]
-    for thread, func in threads:
-        if not thread.is_alive():
-            thread = threading.Thread(target=func)
-            thread.start()
-    time.sleep(1)
+        thread2 = threading.Thread(target=run_t265)
+        thread2.start()
+
+        thread3 = threading.Thread(target=run_d4xx)
+        thread3.start()
+
+        # Restart threads if they exit
+        while True:
+            threads = [(thread1, mavproxy_create_connection), (thread2, run_t265), (thread3, run_d4xx)]
+            for thread, func in threads:
+                if not thread.is_alive():
+                    thread = threading.Thread(target=func)
+                    thread.start()
+            time.sleep(1)
