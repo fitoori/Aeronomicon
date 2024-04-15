@@ -1,3 +1,7 @@
+#############################################################
+##     Image Capture Utility for Intel RealSense D4XX      ##
+#############################################################
+
 import pyrealsense2 as rs
 import numpy as np
 import cv2
