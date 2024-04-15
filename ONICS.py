@@ -3,16 +3,17 @@
 ##################################################################
 ##  ONICS - Optical Navigation and Interference Control System  ##
 ##################################################################
-
 import subprocess
 import threading
 import logging
 import time
 import os
 
+# Define log file path (change this path as needed)
+log_file_path = "/home/pi/onics.log"
+
 # Configure logging
-log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'onics.log')
-logging.basicConfig(filename=log_path, level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(filename=log_file_path, level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Define variables
 connection_in_port = "127.0.0.1:14550"
@@ -90,14 +91,14 @@ def run_t265():
 
 # Function to continuously publish logs to shell
 def publish_logs():
-    with open(log_path, 'r') as logfile:
+    with open(log_file_path, 'r') as logfile:
         logfile.seek(0, os.SEEK_END)  # Move file pointer to the end of the file
         while True:
             line = logfile.readline()
             if line:
-                print(line.strip())
+                print(line.strip())  # Print the log line to the console
             else:
-                time.sleep(1)
+                time.sleep(1)  # Sleep briefly if no new log lines are available
 
 # Start log publishing thread
 log_thread = threading.Thread(target=publish_logs)
