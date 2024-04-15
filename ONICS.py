@@ -8,9 +8,11 @@ import subprocess
 import threading
 import logging
 import time
+import os
 
 # Configure logging
-logging.basicConfig(filename='/home/pi/ONICS/onics.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'onics.log')
+logging.basicConfig(filename=log_path, level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Define variables
 connection_in_port = "127.0.0.1:14550"
@@ -20,13 +22,17 @@ connection_out_p02 = "127.0.0.1:14560"  # D435i
 connection_out_p03 = "/dev/ttyUSB0"     # SiK Radio
 
 t265_enabled = True
-d435i_enabled = True
+d4xx_enabled = True
 
 # Function to check if a RealSense device is connected
-def is_device_connected(device_name):
+def is_device_connected(device_prefix):
     try:
         result = subprocess.run(["rs-enumerate-devices"], capture_output=True, text=True)
-        return device_name in result.stdout
+        lines = result.stdout.splitlines()
+        for line in lines:
+            if line.startswith(device_prefix):
+                return True
+        return False
     except subprocess.CalledProcessError as e:
         logging.error("Error checking for RealSense devices: %s", e)
         return False
@@ -39,9 +45,34 @@ def mavproxy_create_connection():
                         "--baudrate=" + connection_in_baud,
                         "--out", "udp:" + connection_out_p01,
                         "--out", "udp:" + connection_out_p02,
-                        "--out", connection_out_p03], check=True, cwd="/home/pi/ONICS/")
+                        "--out", connection_out_p03], check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
     except subprocess.CalledProcessError as e:
         logging.error("mavproxy error: %s", e)
+
+# Function to run a specific script
+def run_script(script_name, args):
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script_name)
+    if os.path.exists(script_path):
+        try:
+            subprocess.run(["python3", script_name] + args, check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
+        except subprocess.CalledProcessError as e:
+            logging.error(f"{script_name} script error: {e}")
+    else:
+        logging.warning(f"{script_name} script not found.")
+
+# Function to run RealSense D4XX scripts
+def run_d4xx():
+    global d4xx_enabled
+    while d4xx_enabled:
+        if is_device_connected("D4"):
+            try:
+                subprocess.run(["python3", "d4xx_to_mavlink.py", "--connect=" + connection_out_p02], check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
+            except subprocess.CalledProcessError as e:
+                logging.error("D4XX script error: %s", e)
+        else:
+            logging.warning("No D4XX device detected. Skipping D4XX script.")
+            d4xx_enabled = False
+            break
 
 # Function to run T265 script
 def run_t265():
@@ -49,7 +80,7 @@ def run_t265():
     while t265_enabled:
         if is_device_connected("T265"):
             try:
-                subprocess.run(["python3", "t265_precland_apriltags.py", "--connect=" + connection_out_p01], check=True, cwd="/home/pi/ONICS/")
+                subprocess.run(["python3", "t265_precland_apriltags.py", "--connect=" + connection_out_p01], check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
             except subprocess.CalledProcessError as e:
                 logging.error("T265 script error: %s", e)
         else:
@@ -57,23 +88,10 @@ def run_t265():
             t265_enabled = False
             break
 
-# Function to run D435i script
-def run_d435i():
-    global d435i_enabled
-    while d435i_enabled:
-        if is_device_connected("D435i"):
-            try:
-                subprocess.run(["python3", "d4xx_to_mavlink.py", "--connect=" + connection_out_p02], check=True, cwd="/home/pi/ONICS/")
-            except subprocess.CalledProcessError as e:
-                logging.error("D435i script error: %s", e)
-        else:
-            logging.warning("D435i device not detected. Skipping D435i script.")
-            d435i_enabled = False
-            break
-
 # Function to continuously publish logs to shell
 def publish_logs():
-    with open('/home/pi/ONICS/onics.log', 'r') as logfile:
+    with open(log_path, 'r') as logfile:
+        logfile.seek(0, os.SEEK_END)  # Move file pointer to the end of the file
         while True:
             line = logfile.readline()
             if line:
@@ -95,18 +113,14 @@ thread1.start()
 thread2 = threading.Thread(target=run_t265)
 thread2.start()
 
-thread3 = threading.Thread(target=run_d435i)
+thread3 = threading.Thread(target=run_d4xx)
 thread3.start()
 
 # Restart threads if they exit
 while True:
-    if not thread1.is_alive():
-        thread1 = threading.Thread(target=mavproxy_create_connection)
-        thread1.start()
-    if not thread2.is_alive() and t265_enabled:
-        thread2 = threading.Thread(target=run_t265)
-        thread2.start()
-    if not thread3.is_alive() and d435i_enabled:
-        thread3 = threading.Thread(target=run_d435i)
-        thread3.start()
+    threads = [(thread1, mavproxy_create_connection), (thread2, run_t265), (thread3, run_d4xx)]
+    for thread, func in threads:
+        if not thread.is_alive():
+            thread = threading.Thread(target=func)
+            thread.start()
     time.sleep(1)
