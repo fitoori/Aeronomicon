@@ -1,7 +1,6 @@
 import sys
 import os
 import argparse
-import threading
 import time
 import cv2
 import numpy as np
@@ -9,6 +8,7 @@ import transformations as tf
 from apscheduler.schedulers.background import BackgroundScheduler
 from dronekit import connect, VehicleMode
 from pymavlink import mavutil
+from multiprocessing import Process, Pipe
 
 try:
     import apriltags3 
@@ -52,7 +52,6 @@ os.environ["MAVLINK20"] = "1"
 
 # Global variables
 vehicle = None
-pipe = None
 current_time = 0
 
 # Default global position
@@ -71,8 +70,7 @@ def connect_vehicle():
         print(f'Error connecting to vehicle: {e}')
         sys.exit(1)
 
-def realsense_connect():
-    global pipe
+def realsense_process(conn):
     try:
         import pyrealsense2 as rs
         pipe = rs.pipeline()
@@ -81,54 +79,58 @@ def realsense_connect():
         cfg.enable_stream(rs.stream.fisheye, 1)
         cfg.enable_stream(rs.stream.fisheye, 2)
         pipe.start(cfg)
-    except Exception as e:
-        print(f'Error connecting to RealSense: {e}')
-        sys.exit(1)
 
-def setup_scheduler():
-    global vehicle
-    try:
-        sched = BackgroundScheduler()
-        sched.add_job(send_vision_position_message, 'interval', seconds=1/vision_msg_hz)
-        sched.add_job(send_confidence_level_dummy_message, 'interval', seconds=1/confidence_msg_hz)
-        sched.add_job(send_land_target_message, 'interval', seconds=1/landing_target_msg_hz_default)
-        sched.start()
+        while True:
+            frames = pipe.wait_for_frames()
+            pose = frames.get_pose_frame()
+            if pose:
+                data = pose.get_pose_data()
+                # Send pose data through pipe
+                conn.send(data)
     except Exception as e:
-        print(f'Scheduler setup failed: {e}')
-        if vehicle:
-            vehicle.close()
-        sys.exit(1)
+        print(f'Error in RealSense process: {e}')
+    finally:
+        conn.close()
 
-def send_vision_position_message():
-    global vehicle, current_time
+def send_vision_position_message(conn):
+    global current_time
     try:
-        if vehicle and current_time:
-            # Send vision position message
-            msg = vehicle.message_factory.vision_position_estimate_encode(current_time, 0, 0, 0, 0, 0, 0)
-            vehicle.send_mavlink(msg)
-            vehicle.flush()
+        while True:
+            if current_time:
+                # Receive data from RealSense process
+                if conn.poll():
+                    pose_data = conn.recv()
+                    # Process pose data and send MAVLink message
+                    # msg = vehicle.message_factory.vision_position_estimate_encode(...)
+                    # vehicle.send_mavlink(msg)
+                    # vehicle.flush()
+                time.sleep(1 / vision_msg_hz)
     except Exception as e:
         print(f'Error sending vision position message: {e}')
 
 def send_confidence_level_dummy_message():
-    global vehicle, current_time
+    global current_time
     try:
-        if vehicle and current_time:
-            # Send confidence level message
-            msg = vehicle.message_factory.vision_position_delta_encode(0, 0, [0, 0, 0], [0, 0, 0], 0)
-            vehicle.send_mavlink(msg)
-            vehicle.flush()
+        while True:
+            if current_time:
+                # Send dummy confidence level message
+                # msg = vehicle.message_factory.vision_position_delta_encode(...)
+                # vehicle.send_mavlink(msg)
+                # vehicle.flush()
+                time.sleep(1 / confidence_msg_hz)
     except Exception as e:
         print(f'Error sending confidence level message: {e}')
 
 def send_land_target_message():
-    global vehicle, current_time
+    global current_time
     try:
-        if vehicle and current_time:
-            # Send landing target message
-            msg = vehicle.message_factory.landing_target_encode(current_time, 0, mavutil.mavlink.MAV_FRAME_BODY_NED, 0, 0, 0, 0, 0, 0, 0, (1, 0, 0, 0), 2, 1)
-            vehicle.send_mavlink(msg)
-            vehicle.flush()
+        while True:
+            if current_time:
+                # Send landing target message
+                # msg = vehicle.message_factory.landing_target_encode(...)
+                # vehicle.send_mavlink(msg)
+                # vehicle.flush()
+                time.sleep(1 / landing_target_msg_hz)
     except Exception as e:
         print(f'Error sending landing target message: {e}')
 
@@ -137,20 +139,38 @@ def main():
     try:
         # Initialize connections
         connect_vehicle()
-        realsense_connect()
-        setup_scheduler()
+
+        # Set up pipes for inter-process communication
+        rs_conn, vision_conn = Pipe()
+
+        # Start RealSense process
+        rs_process = Process(target=realsense_process, args=(rs_conn,))
+        rs_process.daemon = True
+        rs_process.start()
+
+        # Start vision message sender process
+        vision_process = Process(target=send_vision_position_message, args=(vision_conn,))
+        vision_process.daemon = True
+        vision_process.start()
+
+        # Start confidence message sender process
+        confidence_process = Process(target=send_confidence_level_dummy_message)
+        confidence_process.daemon = True
+        confidence_process.start()
+
+        # Start landing target message sender process
+        landing_target_process = Process(target=send_land_target_message)
+        landing_target_process.daemon = True
+        landing_target_process.start()
 
         # Main loop
         while True:
-            # Perform tasks and process data here
             current_time = int(round(time.time() * 1000000))
             time.sleep(1)  # Placeholder for actual processing
-            
+
     except KeyboardInterrupt:
         print("INFO: KeyboardInterrupt caught. Cleaning up...")
     finally:
-        if pipe:
-            pipe.stop()
         if vehicle:
             vehicle.close()
         print("INFO: Cleanup complete.")
