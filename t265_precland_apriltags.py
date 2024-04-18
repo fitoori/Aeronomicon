@@ -9,9 +9,9 @@
 #   pip3 install apscheduler
 import sys
 import os
-import time
 import argparse
 import threading
+import time
 import cv2
 import numpy as np
 import transformations as tf
@@ -20,103 +20,151 @@ from dronekit import connect, VehicleMode
 from pymavlink import mavutil
 
 try:
-    import apriltags3
+    import apriltags3 
 except ImportError:
-    raise ImportError('Please install apriltags3: pip install apriltags3')
-
-# Set MAVLink protocol to version 2
-os.environ["MAVLINK20"] = "1"
+    raise ImportError('Please install the Python wrapper for apriltag3 (apriltags3.py).')
 
 # Default configurations
-DEFAULT_CONNECTION_STRING = '/dev/ttyUSB0'
-DEFAULT_BAUDRATE = 921600
-DEFAULT_VISION_MSG_HZ = 20
-DEFAULT_LANDING_TARGET_MSG_HZ = 20
-DEFAULT_CONFIDENCE_MSG_HZ = 1
-DEFAULT_CAMERA_ORIENTATION = 1
+connection_string_default = '/dev/ttyUSB0'
+connection_baudrate_default = 921600
+vision_msg_hz_default = 20
+landing_target_msg_hz_default = 20
+confidence_msg_hz_default = 1
+camera_orientation_default = 1
 
-# Parse command-line arguments
+# Argument parser
 parser = argparse.ArgumentParser(description='ArduPilot + Realsense T265 + AprilTags')
 parser.add_argument('--connect', help="Vehicle connection target string.")
-parser.add_argument('--baudrate', type=int, help="Vehicle connection baudrate.")
+parser.add_argument('--baudrate', type=float, help="Vehicle connection baudrate.")
 parser.add_argument('--vision_msg_hz', type=float, help="Update frequency for VISION_POSITION_ESTIMATE message.")
 parser.add_argument('--landing_target_msg_hz', type=float, help="Update frequency for LANDING_TARGET message.")
 parser.add_argument('--confidence_msg_hz', type=float, help="Update frequency for confidence level.")
-parser.add_argument('--camera_orientation', type=int, help="Camera orientation: 0 or 1.")
-parser.add_argument('--visualization', action='store_true', help="Enable visualization.")
-
+parser.add_argument('--scale_calib_enable', type=bool, help="Scale calibration. Only run while NOT in flight.")
+parser.add_argument('--camera_orientation', type=int, help="Configuration for camera orientation.")
+parser.add_argument('--visualization', type=int, help="Enable visualization.")
+parser.add_argument('--debug_enable', type=int, help="Enable debug messages on terminal.")
 args = parser.parse_args()
 
-# Use command-line arguments or defaults
-connection_string = args.connect or DEFAULT_CONNECTION_STRING
-baudrate = args.baudrate or DEFAULT_BAUDRATE
-vision_msg_hz = args.vision_msg_hz or DEFAULT_VISION_MSG_HZ
-landing_target_msg_hz = args.landing_target_msg_hz or DEFAULT_LANDING_TARGET_MSG_HZ
-confidence_msg_hz = args.confidence_msg_hz or DEFAULT_CONFIDENCE_MSG_HZ
-camera_orientation = args.camera_orientation or DEFAULT_CAMERA_ORIENTATION
-visualization = args.visualization
+# Assigning arguments or defaults
+connection_string = args.connect or connection_string_default
+connection_baudrate = args.baudrate or connection_baudrate_default
+vision_msg_hz = args.vision_msg_hz or vision_msg_hz_default
+landing_target_msg_hz = args.landing_target_msg_hz or landing_target_msg_hz_default
+confidence_msg_hz = args.confidence_msg_hz or confidence_msg_hz_default
+scale_calib_enable = args.scale_calib_enable or False
+camera_orientation = args.camera_orientation or camera_orientation_default
+visualization = args.visualization or 0
+debug_enable = args.debug_enable or 0
 
-# Connect to the vehicle
-def connect_to_vehicle():
+# MAVLink environment variable
+os.environ["MAVLINK20"] = "1"
+
+# Global variables
+vehicle = None
+pipe = None
+current_time = 0
+
+# Default global position
+home_lat = 151269321  # Somewhere in Africa
+home_lon = 16624301   # Somewhere in Africa
+home_alt = 163000
+
+# Tracking confidence levels
+pose_data_confidence_level = ('Failed', 'Low', 'Medium', 'High')
+
+def connect_vehicle():
+    global vehicle
     try:
-        return connect(connection_string, wait_ready=True, baud=baudrate, source_system=1)
+        vehicle = connect(connection_string, wait_ready=True, baud=connection_baudrate, source_system=1)
     except Exception as e:
-        print(f"ERROR: Failed to connect to vehicle: {e}")
-        return None
+        print(f'Error connecting to vehicle: {e}')
+        sys.exit(1)
 
-vehicle = connect_to_vehicle()
-if not vehicle:
-    sys.exit(1)  # Exit if vehicle connection failed
-
-# Realsense connection setup
-def setup_realsense():
-    import pyrealsense2 as rs
-    pipe = rs.pipeline()
-    cfg = rs.config()
-    cfg.enable_stream(rs.stream.pose)
-    cfg.enable_stream(rs.stream.fisheye, 1)
-    cfg.enable_stream(rs.stream.fisheye, 2)
-    pipe.start(cfg)
-    return pipe
-
-# Main functionality
-def main():
-    pipe = setup_realsense()
-    if not pipe:
-        vehicle.close()
-        sys.exit(1)  # Exit if Realsense setup failed
-
+def realsense_connect():
+    global pipe
     try:
+        import pyrealsense2 as rs
+        pipe = rs.pipeline()
+        cfg = rs.config()
+        cfg.enable_stream(rs.stream.pose)
+        cfg.enable_stream(rs.stream.fisheye, 1)
+        cfg.enable_stream(rs.stream.fisheye, 2)
+        pipe.start(cfg)
+    except Exception as e:
+        print(f'Error connecting to RealSense: {e}')
+        sys.exit(1)
+
+def setup_scheduler():
+    global vehicle
+    try:
+        sched = BackgroundScheduler()
+        sched.add_job(send_vision_position_message, 'interval', seconds=1/vision_msg_hz)
+        sched.add_job(send_confidence_level_dummy_message, 'interval', seconds=1/confidence_msg_hz)
+        sched.add_job(send_land_target_message, 'interval', seconds=1/landing_target_msg_hz_default)
+        sched.start()
+    except Exception as e:
+        print(f'Scheduler setup failed: {e}')
+        if vehicle:
+            vehicle.close()
+        sys.exit(1)
+
+def send_vision_position_message():
+    global vehicle, current_time
+    try:
+        if vehicle and current_time:
+            # Send vision position message
+            msg = vehicle.message_factory.vision_position_estimate_encode(current_time, 0, 0, 0, 0, 0, 0)
+            vehicle.send_mavlink(msg)
+            vehicle.flush()
+    except Exception as e:
+        print(f'Error sending vision position message: {e}')
+
+def send_confidence_level_dummy_message():
+    global vehicle, current_time
+    try:
+        if vehicle and current_time:
+            # Send confidence level message
+            msg = vehicle.message_factory.vision_position_delta_encode(0, 0, [0, 0, 0], [0, 0, 0], 0)
+            vehicle.send_mavlink(msg)
+            vehicle.flush()
+    except Exception as e:
+        print(f'Error sending confidence level message: {e}')
+
+def send_land_target_message():
+    global vehicle, current_time
+    try:
+        if vehicle and current_time:
+            # Send landing target message
+            msg = vehicle.message_factory.landing_target_encode(current_time, 0, mavutil.mavlink.MAV_FRAME_BODY_NED, 0, 0, 0, 0, 0, 0, 0, (1, 0, 0, 0), 2, 1)
+            vehicle.send_mavlink(msg)
+            vehicle.flush()
+    except Exception as e:
+        print(f'Error sending landing target message: {e}')
+
+def main():
+    global current_time
+    try:
+        # Initialize connections
+        connect_vehicle()
+        realsense_connect()
+        setup_scheduler()
+
+        # Main loop
         while True:
-            frames = pipe.wait_for_frames()
-            pose = frames.get_pose_frame()
-            if pose:
-                data = pose.get_pose_data()
-                process_pose_data(data)
-
-            # Other processing and AprilTag detection here...
-
-            if visualization:
-                display_frames(frames)
-
-            time.sleep(0.01)  # Adjust as needed for processing rate
-
+            # Perform tasks and process data here
+            current_time = int(round(time.time() * 1000000))
+            time.sleep(1)  # Placeholder for actual processing
+            
     except KeyboardInterrupt:
-        print("INFO: Keyboard Interrupt. Exiting...")
-
+        print("INFO: KeyboardInterrupt caught. Cleaning up...")
     finally:
-        pipe.stop()
-        vehicle.close()
-        print("INFO: Realsense pipeline and vehicle connection closed.")
+        if pipe:
+            pipe.stop()
+        if vehicle:
+            vehicle.close()
+        print("INFO: Cleanup complete.")
 
-def process_pose_data(data):
-    # Process pose data here
-    pass
-
-def display_frames(frames):
-    # Display frames for visualization
-    pass
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
+
 
