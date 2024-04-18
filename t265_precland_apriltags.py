@@ -3,21 +3,33 @@
 #####################################################
 ##   Precision Landing with T265 using AprilTags   ##
 #####################################################
-# Install required packages:
-#   pip3 install transformations
-#   pip3 install dronekit
-#   pip3 install apscheduler
+
+# Set the path for pyrealsense2.[].so
 import sys
+sys.path.append("/usr/local/lib/")
+
+# Remove the path to python2 version that is added by ROS, see here https://stackoverflow.com/questions/43019951/after-install-ros-kinetic-cannot-import-opencv
+if '/opt/ros/kinetic/lib/python2.7/dist-packages' in sys.path:
+    sys.path.remove('/opt/ros/kinetic/lib/python2.7/dist-packages') 
+
+# Set MAVLink protocol to 2.
 import os
-import argparse
-import threading
-import time
+os.environ["MAVLINK20"] = "1"
+
+# Import the libraries
+import pyrealsense2 as rs
 import cv2
 import numpy as np
 import transformations as tf
+import math as m
+import time
+import argparse
+import threading
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from dronekit import connect, VehicleMode
 from pymavlink import mavutil
+
 
 try:
     import apriltags3 
