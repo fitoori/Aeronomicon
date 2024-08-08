@@ -117,12 +117,21 @@ def publish_logs():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ONICS - Optical Navigation and Interference Control System")
     parser.add_argument("-e", "--enumerate", action="store_true", help="Enumerate detected RealSense devices")
+    parser.add_argument("-d", "--disable-t265", action="store_true", help="Disable T265 thread")
+    parser.add_argument("-t", "--disable-d4xx", action="store_true", help="Disable D4XX thread")
 
     args = parser.parse_args()
 
     if args.enumerate:
         enumerate_devices()
     else:
+        if args.disable_t265:
+            t265_enabled = False
+            logging.info("T265 thread disabled by user.")
+        if args.disable_d4xx:
+            d4xx_enabled = False
+            logging.info("D4XX thread disabled by user.")
+
         # Start log publishing thread
         log_thread = threading.Thread(target=publish_logs)
         log_thread.start()
@@ -134,15 +143,21 @@ if __name__ == "__main__":
         thread1 = threading.Thread(target=mavproxy_create_connection)
         thread1.start()
 
-        thread2 = threading.Thread(target=run_t265)
-        thread2.start()
+        if t265_enabled:
+            thread2 = threading.Thread(target=run_t265)
+            thread2.start()
 
-        thread3 = threading.Thread(target=run_d4xx)
-        thread3.start()
+        if d4xx_enabled:
+            thread3 = threading.Thread(target=run_d4xx)
+            thread3.start()
 
         # Restart threads if they exit
         while True:
-            threads = [(thread1, mavproxy_create_connection), (thread2, run_t265), (thread3, run_d4xx)]
+            threads = [(thread1, mavproxy_create_connection)]
+            if t265_enabled:
+                threads.append((thread2, run_t265))
+            if d4xx_enabled:
+                threads.append((thread3, run_d4xx))
             for thread, func in threads:
                 if not thread.is_alive():
                     thread = threading.Thread(target=func)
