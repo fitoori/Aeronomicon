@@ -117,20 +117,24 @@ def publish_logs():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ONICS - Optical Navigation and Interference Control System")
     parser.add_argument("-e", "--enumerate", action="store_true", help="Enumerate detected RealSense devices")
-    parser.add_argument("-d", "--disable-t265", action="store_true", help="Disable T265 thread")
-    parser.add_argument("-t", "--disable-d4xx", action="store_true", help="Disable D4XX thread")
+    parser.add_argument("-d", "--disable-t265", action="store_true", help="Disable the T265 thread")
+    parser.add_argument("-t", "--disable-d4xx", action="store_true", help="Disable the D4XX thread")
+    parser.add_argument("-s", "--sik-only", action="store_true", help="Initialize only the SiK radio (disables both T265 and D4XX)")
 
     args = parser.parse_args()
 
     if args.enumerate:
         enumerate_devices()
     else:
-        if args.disable_t265:
+        # Handle flag logic
+        if args.sik_only:
             t265_enabled = False
-            logging.info("T265 thread disabled by user.")
-        if args.disable_d4xx:
             d4xx_enabled = False
-            logging.info("D4XX thread disabled by user.")
+        else:
+            if args.disable_t265:
+                t265_enabled = False
+            if args.disable_d4xx:
+                d4xx_enabled = False
 
         # Start log publishing thread
         log_thread = threading.Thread(target=publish_logs)
