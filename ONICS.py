@@ -17,102 +17,81 @@ log_file_path = "/home/pi/onics.log"
 # Configure logging
 logging.basicConfig(filename=log_file_path, level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Define variables
+# Define connection parameters
 connection_in_port = "127.0.0.1:14550"
 connection_in_baud = "921600"
 connection_out_p01 = "127.0.0.1:14540"  # T265
 connection_out_p02 = "127.0.0.1:14560"  # D435i
 connection_out_p03 = "/dev/ttyUSB0"     # SiK Radio
 
-t265_enabled = True
-d4xx_enabled = True
-
-# Function to check if a RealSense device is connected
 def is_device_connected(device_prefix):
     try:
-        result = subprocess.run(["rs-enumerate-devices"], capture_output=True, text=True)
-        lines = result.stdout.splitlines()
-        for line in lines:
-            if device_prefix in line:
-                return True
-        return False
-    except subprocess.CalledProcessError as e:
+        result = subprocess.run(["rs-enumerate-devices"], capture_output=True, text=True, check=True)
+        return any(device_prefix in line for line in result.stdout.splitlines())
+    except subprocess.SubprocessError as e:
         logging.error("Error checking for RealSense devices: %s", e)
         return False
 
-# Function to enumerate and list relevant RealSense devices
 def enumerate_devices():
-    relevant_devices = ["T265", "D4"]  # Relevant RealSense device prefixes
-    detected_devices = []
-
+    relevant_devices = ["T265", "D4"]
     try:
-        result = subprocess.run(["rs-enumerate-devices"], capture_output=True, text=True)
-        lines = result.stdout.splitlines()
-        for line in lines:
-            for device_prefix in relevant_devices:
-                if device_prefix in line:
-                    detected_devices.append(line.strip())
-                    break
-    except subprocess.CalledProcessError as e:
+        result = subprocess.run(["rs-enumerate-devices"], capture_output=True, text=True, check=True)
+        detected_devices = [line.strip() for line in result.stdout.splitlines() if any(dev in line for dev in relevant_devices)]
+        if detected_devices:
+            print("Detected RealSense Devices:")
+            for device in detected_devices:
+                print(device)
+        else:
+            print("No relevant RealSense devices detected.")
+    except subprocess.SubprocessError as e:
         logging.error("Error enumerating RealSense devices: %s", e)
 
-    if detected_devices:
-        print("Detected RealSense Devices:")
-        for device in detected_devices:
-            print(device)
-    else:
-        print("No relevant RealSense devices detected.")
-
-# Function to run mavproxy
 def mavproxy_create_connection():
     try:
         subprocess.run(["mavproxy.py",
-                        "--master=" + connection_in_port,
-                        "--baudrate=" + connection_in_baud,
-                        "--out", "udp:" + connection_out_p01,
-                        "--out", "udp:" + connection_out_p02,
-                        "--out", connection_out_p03], check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
-    except subprocess.CalledProcessError as e:
+                        f"--master={connection_in_port}",
+                        f"--baudrate={connection_in_baud}",
+                        "--out", f"udp:{connection_out_p01}",
+                        "--out", f"udp:{connection_out_p02}",
+                        "--out", connection_out_p03], check=True)
+    except subprocess.SubprocessError as e:
         logging.error("mavproxy error: %s", e)
 
-# Function to run RealSense D4XX scripts
 def run_d4xx():
-    global d4xx_enabled
-    while d4xx_enabled:
+    while True:
         if is_device_connected("D4"):
             try:
-                subprocess.run(["python3", "d4xx_to_mavlink.py", "--connect=" + connection_out_p02], check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
-            except subprocess.CalledProcessError as e:
+                subprocess.run(["python3", "d4xx_to_mavlink.py", f"--connect={connection_out_p02}"], check=True)
+            except subprocess.SubprocessError as e:
                 logging.error("D4XX script error: %s", e)
+                break
         else:
             logging.warning("No D4XX device detected. Skipping D4XX script.")
-            d4xx_enabled = False
             break
+        time.sleep(1)
 
-# Function to run T265 script
 def run_t265():
-    global t265_enabled
-    while t265_enabled:
+    while True:
         if is_device_connected("T265"):
             try:
-                subprocess.run(["python3", "t265_precland_apriltags.py", "--connect=" + connection_out_p01], check=True, cwd=os.path.dirname(os.path.abspath(__file__)))
-            except subprocess.CalledProcessError as e:
+                subprocess.run(["python3", "t265_precland_apriltags.py", f"--connect={connection_out_p01}"], check=True)
+            except subprocess.SubprocessError as e:
                 logging.error("T265 script error: %s", e)
+                break
         else:
             logging.warning("T265 device not detected. Skipping T265 script.")
-            t265_enabled = False
             break
+        time.sleep(1)
 
-# Function to continuously publish logs to shell
 def publish_logs():
     with open(log_file_path, 'r') as logfile:
-        logfile.seek(0, os.SEEK_END)  # Move file pointer to the end of the file
+        logfile.seek(0, os.SEEK_END)
         while True:
             line = logfile.readline()
             if line:
-                print(line.strip())  # Print the log line to the console
+                print(line.strip())
             else:
-                time.sleep(1)  # Sleep briefly if no new log lines are available
+                time.sleep(1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ONICS - Optical Navigation and Interference Control System")
@@ -126,44 +105,22 @@ if __name__ == "__main__":
     if args.enumerate:
         enumerate_devices()
     else:
-        # Handle flag logic
-        if args.sik_only:
-            t265_enabled = False
-            d4xx_enabled = False
-        else:
-            if args.disable_t265:
-                t265_enabled = False
-            if args.disable_d4xx:
-                d4xx_enabled = False
+        t265_enabled = not (args.disable_t265 or args.sik_only)
+        d4xx_enabled = not (args.disable_d4xx or args.sik_only)
 
-        # Start log publishing thread
-        log_thread = threading.Thread(target=publish_logs)
+        log_thread = threading.Thread(target=publish_logs, daemon=True)
         log_thread.start()
 
-        # Output initializing message to console
         print("ONICS - Optical Navigation and Interference Control System is initializing...")
 
-        # Start threads for running scripts
-        thread1 = threading.Thread(target=mavproxy_create_connection)
-        thread1.start()
-
+        threads = [threading.Thread(target=mavproxy_create_connection)]
         if t265_enabled:
-            thread2 = threading.Thread(target=run_t265)
-            thread2.start()
-
+            threads.append(threading.Thread(target=run_t265))
         if d4xx_enabled:
-            thread3 = threading.Thread(target=run_d4xx)
-            thread3.start()
+            threads.append(threading.Thread(target=run_d4xx))
 
-        # Restart threads if they exit
-        while True:
-            threads = [(thread1, mavproxy_create_connection)]
-            if t265_enabled:
-                threads.append((thread2, run_t265))
-            if d4xx_enabled:
-                threads.append((thread3, run_d4xx))
-            for thread, func in threads:
-                if not thread.is_alive():
-                    thread = threading.Thread(target=func)
-                    thread.start()
-            time.sleep(1)
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join()  # Wait for threads to complete or terminate
