@@ -22,7 +22,7 @@ connection_in_port = "127.0.0.1:14550"
 connection_in_baud = "921600"
 connection_out_p01 = "127.0.0.1:14540"  # T265
 connection_out_p02 = "127.0.0.1:14560"  # D435i
-connection_out_p03 = "/dev/ttyUSB0"     # SiK Radio
+connection_out_p03 = "/dev/usb-FTDI_FT230X_Basic_UART_D30AAUZG-if00-port0"     # SiK Radio
 
 def is_device_connected(device_prefix):
     try:
