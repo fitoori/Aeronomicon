@@ -103,7 +103,7 @@ obstacle_line_height_ratio = 0.18  # [0-1]: 0-Top, 1-Bottom
 obstacle_line_thickness_pixel = 10  # [1-DEPTH_HEIGHT]
 
 USE_PRESET_FILE = True
-PRESET_FILE  = "../cfg/d4xx-default.json"
+PRESET_FILE  = "../cfg/d4xx-default.json"  # Path to the preset file
 
 RTSP_STREAMING_ENABLE = True
 RTSP_PORT = "8554"
@@ -337,7 +337,8 @@ def realsense_enable_advanced_mode(advnc_mode):
 
 def realsense_load_settings_file(advnc_mode, setting_file):
     if not os.path.isfile(setting_file):
-        raise FileNotFoundError(f"Setting file not found: {setting_file}")
+        logging.warning(f"Settings file '{setting_file}' not found. Proceeding with default settings.")
+        return
     with open(setting_file, 'r') as file:
         json_text = file.read().strip()
     advnc_mode.load_json(json_text)
@@ -552,6 +553,12 @@ if __name__ == "__main__":
     try:
         if USE_PRESET_FILE:
             realsense_configure_setting(PRESET_FILE)
+        else:
+            # Proceed with default settings
+            device = find_device_that_supports_advanced_mode()
+            advnc_mode = rs.rs400_advanced_mode(device)
+            realsense_enable_advanced_mode(advnc_mode)
+            logging.info("Using default RealSense settings.")
         realsense_connect()
     except Exception as e:
         logging.error(f"Error initializing RealSense camera: {e}")
