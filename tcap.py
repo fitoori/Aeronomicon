@@ -2,7 +2,7 @@
 ##     Image Capture Utility for Intel RealSense T265      ##
 #############################################################
 
-import pyrealsense2 as rs
+import pyrealsense2.pyrealsense2 as rs
 import numpy as np
 import cv2
 import os
