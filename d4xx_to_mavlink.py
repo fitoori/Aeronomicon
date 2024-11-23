@@ -26,7 +26,7 @@ import logging
 
 # Import third-party libraries
 try:
-    import pyrealsense2 as rs
+    import pyrealsense2.pyrealsense2 as rs
 except ImportError:
     print("Error: pyrealsense2 module not found. Please install it using 'pip3 install pyrealsense2'")
     sys.exit(1)
