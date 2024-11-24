@@ -1,7 +1,7 @@
 #!/bin/bash
 
 LOG_FILE="/home/pi/uplink.log"
-PING_TARGET="sixfab.com"
+PING_TARGET="dataplicity.com"
 WWAN_INTERFACE="wwan0"
 PING_INTERVAL=300  # 5 minutes
 RETRY_INTERVAL=60
