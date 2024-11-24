@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
 
 ######################################################
-##  librealsense D4xx to MAVLink                    ##
+##          librealsense D4XX to MAVLink            ##
 ######################################################
-
-# Requirements:
-#   x86 based Companion Computer (for compatibility with Intel),
-#   Ubuntu 18.04 or newer,
-#   Python3
-# Install required packages:
-#   pip3 install pyrealsense2 numpy pyserial transformations pymavlink apscheduler opencv-python
-#   sudo apt -y install python3-gst-1.0 gir1.2-gst-rtsp-server-1.0 gstreamer1.0-plugins-base \
-#                       gstreamer1.0-plugins-ugly libx264-dev
 
 # Import standard libraries
 import sys
