@@ -10,6 +10,10 @@
 # Just make sure you don't set the daily reboot to a time where it's likely to be in the air.
 # WATNE's ArduPilot runs directly off the Linux stack and a reboot would cause the intricate flying machine to fall to the ground with all the elegance of a very expensive toaster oven.
 
+# 300s  = 5mins
+# 3600s = 1hr
+# You figure out the rest.
+
 LOG_FILE="/home/pi/uplink.log"
 PING_TARGET="dataplicity.com"
 WWAN_INTERFACE="wwan0"
