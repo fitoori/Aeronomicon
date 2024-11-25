@@ -4,6 +4,11 @@
 ##  ONICS - Optical Navigation and Interference Control System  ##
 ##################################################################
 
+# This script uses single-core threading to manage connections. 
+# ONICS has been rewritten with multiprocessing and released as ONICS 2.  
+# If your device is lagging/freezing/hanging/crashing under load, please consider switching. 
+
+
 import subprocess
 import threading
 import logging
