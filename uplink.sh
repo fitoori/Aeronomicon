@@ -1,5 +1,15 @@
 #!/bin/bash
 
+#################################
+##    LTE Uplink for WATNE     ##
+#################################
+
+# Self-healing LTE connection for when you need it most.
+# Messed up so bad you can't connect to your drone anymore?
+# If it has enough power to last until reboot time you get another shot!
+# Just make sure you don't set the daily reboot time to a time where it's likely to be in the air.
+# ArduPilot runs directly off the Linux stack and a reboot would cause your intricate flying machine to fall to the ground with all the elegance of a very expensive toaster oven.
+
 LOG_FILE="/home/pi/uplink.log"
 PING_TARGET="dataplicity.com"
 WWAN_INTERFACE="wwan0"
