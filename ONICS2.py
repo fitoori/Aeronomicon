@@ -2,7 +2,12 @@
 
 ##################################################################
 ##  ONICS - Optical Navigation and Interference Control System  ##
+##                             Mk.II                            ##
+##                  *now with multi-core support*               ##
 ##################################################################
+
+# This script is under development and may not be stable. 
+# If you experience connection issues, please consider temporarily reverting to ONICS 1.
 
 import subprocess
 import multiprocessing
