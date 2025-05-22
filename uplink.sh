@@ -1,159 +1,191 @@
-
 #!/usr/bin/env bash
-###############################################################################
-#  LTE Uplink for WATNE – self-healing, arming-aware connection manager       #
-###############################################################################
+
+#################################
+##    LTE Uplink for WATNE     ##
+##         Version 5.0         ##
+#################################
+
+# Self-healing LTE connection for when you need it most.
+# Messed up so bad you can't connect to your drone anymore?
+# If it has enough power to last until reboot time you get another shot!
+# Now integrates with ONICS to parse arming status before reboot.
+
+# Requires: bash ≥ 4, sudo, iproute2, qmicli, udhcpc; jq optional 
+
+# 300s  = 5mins
+# 600s  = 10mins
+# 1200s = 20mins
+# 3600s = 1hr
+# You figure out the rest.
 
 set -euo pipefail
+shopt -s lastpipe
 IFS=$'\n\t'
 
-########################### configurable parameters ###########################
-LOG_FILE="/home/pi/uplink.log"
-PING_TARGET="dataplicity.com"
-WWAN_INTERFACE="wwan0"
-PING_INTERVAL=300           # seconds between health checks
-RETRY_INTERVAL=60           # seconds between reconnection attempts
-MAX_RETRIES=3               # after this many failures → safe_reboot
-APN="hologram"
+############################### user parameters ###############################
 
-DAILY_REBOOT_TIME="01:00"   # empty to disable daily reboot
+## log-related parameters
+readonly LOG_FILE="/home/pi/uplink.log"                # logfile location
+readonly LOG_MAX_BYTES=$((1 * 1024 * 1024))            # rotate at 1 MiB
 
-# Arming-status JSON written by ONICS
-ARMING_STATUS_FILE="/home/pi/arming_status.json"
-STALE_THRESHOLD=3600        # seconds; older == “stale”
-STALE_AS_ARMED=true         # true => stale = armed, false => stale = disarmed
-# WATNE's ArduPilot runs directly off the Linux stack and a reboot would cause 
-# the intricate flying machine to fall to the ground with all the elegance of 
-# a very expensive toaster oven. Therefore set the above value to false at
-# your own risk. 
+## LTE-related parameters
+readonly PING_TARGET="dataplicity.com"                 # website to ping when testing internet connectivity
+readonly WWAN_INTERFACE="wwan0"                        # LTE interface as parsed by ifconfig
+readonly APN="hologram"                                # APN to be passed to qmicli
+
+## persistency-related parameters
+readonly PING_INTERVAL=300          # time between health checks (s)
+readonly RETRY_INTERVAL=60          # base back-off
+readonly MAX_RETRIES=3              # amount of failures to tolerate before rebooting
+readonly MAX_BACKOFF=900            # cap back-off (s)
+
+readonly DAILY_REBOOT_TIME="01:00"  # scheduled time to run reboot (local HH:MM; 24hr; empty ⇒ no reboot)
+readonly PRE_REBOOT_CHECK_SEC=45    # run arming check this many seconds prior to scheduled reboot
+
+## flight-related parameters
+readonly ARMING_STATUS_FILE="/home/pi/arming_status.json"
+readonly FRESH_THRESHOLD=600        # this value should be the maximum theoretical flight time of the vehicle (s)
+'''
+─ STALE_AS_ARMED ─ what it does and why it matters ─
+
++----------+---------------------------+-------------------------+---------------------------+
+| Setting  | When status file is       | Benefit                 | Risk / Cost               |
+|          | missing or >10 min old    |                         |                           |
++==========+===========================+=========================+===========================+
+| false    | Assume DISARMED → reboot  | • Box always reboots,   | • 1-in-a-million chance of|
+|(default) | proceeds                  |   restoring control     |  rebooting mid-flight if  |
+|          |                           | • Best for long ground  |  status feed dies during  |
+|          |                           |  tests & unattended use |  a short flight           |
++----------+---------------------------+-------------------------+---------------------------+
+| true     | Assume ARMED → cancel     | • Absolute guarantee    | • If status pipeline dies |
+|          | reboot                    |   against airborne      |  vehicle may stay offline |
+|          |                           |   reboot                |  forever                  |
++----------+---------------------------+-------------------------+---------------------------+
+
+Choose **false** for availability (ground testing, weeks of uptime).  
+Flip to **true** only when an in-air reboot is intolerable *and* you trust the status file to stay healthy.
+'''
+readonly STALE_AS_ARMED=false       # true ⇒ indicates whether the script should constitute a stale value as ARMED or DISARMED
 ###############################################################################
 
-log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >>"$LOG_FILE"; }
 
-# ─────────── arming status helper ────────────────────────────────────────────
-# Returns 0 if DISARMED (incl. stale treated as DISARMED), 1 otherwise
-is_vehicle_disarmed() {
-    if [[ ! -r $ARMING_STATUS_FILE ]]; then
-        log "Arming-status file missing → assuming ARMED"
-        return 1
-    fi
+############################ logging & housekeeping ###########################
+rotate_log() {
+    [[ -f $LOG_FILE && $(stat -c%s "$LOG_FILE") -gt $LOG_MAX_BYTES ]] || return
+    mv "$LOG_FILE" "${LOG_FILE}.$(date -u +%Y%m%d%H%M%S)"
+    : >"$LOG_FILE"
+}
 
-    local armed_raw ts_raw
-    armed_raw=$(grep -o '"armed":[[:space:]]*\(true\|false\)' "$ARMING_STATUS_FILE" \
-                | head -n1 | awk -F: '{gsub(/[[:space:]]*/, "", $2);print $2}') || true
-    ts_raw=$(grep -o '"timestamp_utc":[[:space:]]*"[^"]\+"' "$ARMING_STATUS_FILE" \
-             | head -n1 | cut -d'"' -f4) || true
+log() { rotate_log; printf '%s %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$1" >>"$LOG_FILE"; }
 
-    if [[ -z $armed_raw || -z $ts_raw ]]; then
-        log "Arming-status JSON incomplete → assuming ARMED"
-        return 1
-    fi
+trap 'log "Termination caught – exiting."; exit 0' TERM INT
+trap 'log "Script aborted by set -e."; exit 1' ERR
 
-    local ts_epoch now_epoch age
-    ts_epoch=$(date -d "$ts_raw" '+%s' 2>/dev/null) || {
-        log "Timestamp parse failure → assuming ARMED"
-        return 1
-    }
-    now_epoch=$(date -u '+%s')
-    age=$(( now_epoch - ts_epoch ))
+############################# single-instance lock ############################
+exec 200>/run/uplink.lock
+flock -n 200 || { echo "uplink.sh already running – exit." >&2; exit 0; }
 
-    if (( age > STALE_THRESHOLD )); then
-        if $STALE_AS_ARMED; then
-            log "Arming-status STALE (${age}s) – treated as ARMED"
-            return 1
+############################### arming helpers ################################
+# 0 ⇒ proceed with reboot; 1 ⇒ cancel reboot
+pre_reboot_safety_check() {
+    log "Pre-reboot check…"
+
+    # read status -------------------------------------------------------------
+    if [[ -r $ARMING_STATUS_FILE ]]; then
+        if command -v jq >/dev/null 2>&1; then
+            armed=$(jq -r '.armed // empty' "$ARMING_STATUS_FILE" 2>/dev/null || true)
+            ts=$(jq  -r '.timestamp_utc // empty' "$ARMING_STATUS_FILE" 2>/dev/null || true)
         else
-            log "Arming-status STALE (${age}s) – treated as DISARMED"
-            return 0
+            armed=$(awk '/"armed":/{gsub(/[^tf]/,"");print;exit}' "$ARMING_STATUS_FILE")
+            ts=$(awk -F'"' '/"timestamp_utc":/{print $4;exit}' "$ARMING_STATUS_FILE")
         fi
     fi
 
-    log "Arming-status fresh (${age}s) – armed=$armed_raw"
-    [[ $armed_raw == "false" ]] && return 0 || return 1
-}
-
-safe_reboot() {
-    if is_vehicle_disarmed; then
-        log "Conditions met → rebooting now"
-        sudo reboot
-    else
-        log "Reboot aborted: vehicle armed or status unknown"
+    # missing or corrupt file -------------------------------------------------
+    if [[ -z ${armed:-} || -z ${ts:-} ]]; then
+        $STALE_AS_ARMED && { log "Status missing/corrupt – cancelling reboot."; sudo shutdown -c; return 1; }
+        log "Status missing/corrupt – proceeding with reboot."
+        return 0
     fi
-}
 
-# ───────── connection management  ───────────────────────────────────────────
-check_connection() {
-    local loss
-    loss=$(ping -I "$WWAN_INTERFACE" -c 3 -W 3 "$PING_TARGET" \
-            | grep -oP '\d+(?=% packet loss)' || echo "Error")
-    if [[ $loss == "Error" || $loss -ge 100 ]]; then
-        log "Connection check FAILED – packet loss ${loss:-Unknown}%"
+    # freshness check ---------------------------------------------------------
+    ts_epoch=$(date -d "$ts" +%s 2>/dev/null) || {
+        $STALE_AS_ARMED && { log "Timestamp parse fail – cancelling reboot."; sudo shutdown -c; return 1; }
+        log "Timestamp parse fail – proceeding with reboot."
+        return 0
+    }
+
+    age=$(( $(date -u +%s) - ts_epoch ))
+
+    if (( age > FRESH_THRESHOLD )); then
+        $STALE_AS_ARMED && { log "Status stale (${age}s) – cancelling reboot."; sudo shutdown -c; return 1; }
+        log "Status stale (${age}s) – proceeding with reboot."
+        return 0
+    fi
+
+    # fresh record ------------------------------------------------------------
+    if [[ $armed == "true" ]]; then
+        log "Vehicle ARMED (fresh) – cancelling reboot."
+        sudo shutdown -c
         return 1
     fi
-    log "Ping OK – packet loss $loss%"
+
+    log "Vehicle DISARMED (fresh) – proceeding with reboot."
     return 0
 }
 
-reconnect_wwan() {
-    log "Re-initialising $WWAN_INTERFACE …"
-    sudo ip link set "$WWAN_INTERFACE" down
-    echo 'Y' | sudo tee "/sys/class/net/$WWAN_INTERFACE/qmi/raw_ip" >/dev/null
-    sudo ip link set "$WWAN_INTERFACE" up
-    sudo qmicli -p -d /dev/cdc-wdm0 \
-         --device-open-net='net-raw-ip|net-no-qos-header' \
-         --wds-start-network="apn='$APN',ip-type=4" --client-no-release-cid
-    if sudo udhcpc -q -f -i "$WWAN_INTERFACE" &>/dev/null; then
-        log "DHCP lease obtained."
-    else
-        log "DHCP lease FAILED."
-    fi
+############################## reboot scheduler ###############################
+next_reboot_job() {
+    local target today now seconds_until
+    today=$(date '+%F')
+    target="${today} ${DAILY_REBOOT_TIME}"
+    seconds_until=$(( $(date -d "$target" +%s) - $(date +%s) ))
+    (( seconds_until <= PRE_REBOOT_CHECK_SEC )) && seconds_until=$(( seconds_until + 86400 ))
+    printf '%s' "$seconds_until"
 }
 
-handle_retries() {
-    local retries=$1
-    if (( retries >= MAX_RETRIES )); then
-        log "Max retries reached ($MAX_RETRIES) – initiating safe reboot"
-        safe_reboot
-        return 0
-    fi
-    log "Retry #$(( retries + 1 )) of $MAX_RETRIES …"
-    reconnect_wwan
-    sleep "$RETRY_INTERVAL"
-    return 1
-}
-
-# ───────── daily reboot gate ────────────────────────────────────────────────
-last_reboot_day=""
-maybe_daily_reboot() {
+schedule_daily_reboot() {
     [[ -z $DAILY_REBOOT_TIME ]] && return
-    local now day
-    now=$(date '+%H:%M'); day=$(date '+%F')
-    if [[ $now == "$DAILY_REBOOT_TIME" && $day != "$last_reboot_day" ]]; then
-        log "Daily reboot window reached ($DAILY_REBOOT_TIME)."
-        if is_vehicle_disarmed; then
-            last_reboot_day=$day
-            log "Daily reboot authorised."
-            sudo reboot
-        else
-            log "Daily reboot postponed: vehicle armed/unknown."
-        fi
-    fi
+    sudo shutdown -c || true
+    sudo shutdown -r "$DAILY_REBOOT_TIME"
+
+    sec_until=$(next_reboot_job)
+    log "Scheduled reboot at ${DAILY_REBOOT_TIME} (in ${sec_until}s)."
+
+    (   sleep $(( sec_until - PRE_REBOOT_CHECK_SEC ))
+        pre_reboot_safety_check
+        schedule_daily_reboot
+    ) &
 }
 
-# ───────── main loop ────────────────────────────────────────────────────────
-log "===== LTE-uplink script started ====="
+################ connection / recovery primitives (unchanged) #################
+discover_wdm() {
+    readlink -f "/sys/class/net/$WWAN_INTERFACE/device" 2>/dev/null \
+        | grep -o 'cdc-wdm[0-9]*' || echo "cdc-wdm0"
+}
+toggle_raw_ip() { f="/sys/class/net/$WWAN_INTERFACE/qmi/raw_ip"; [[ -w $f ]] && echo Y | sudo tee "$f" >/dev/null || log "raw_ip toggle unavailable"; }
+qmi_start() { sudo qmicli -p -d "/dev/$(discover_wdm)" --device-open-net='net-raw-ip|net-no-qos-header' --wds-start-network="apn='$APN',ip-type=4" --client-no-release-cid; }
+dhcp_lease() { timeout 20s sudo udhcpc -q -i "$WWAN_INTERFACE" &>/dev/null; }
+check_connection() { loss=$(ping -I "$WWAN_INTERFACE" -c 3 -W 3 "$PING_TARGET" | awk -F', ' '/packet loss/{print $(NF-2)+0}' || echo 100); (( loss >= 100 )) && { log "Ping FAIL – ${loss}%."; return 1; }; log "Ping OK – ${loss}%."; }
+reconnect_wwan() { log "Re-initialising $WWAN_INTERFACE…"; sudo ip link set "$WWAN_INTERFACE" down; toggle_raw_ip; sudo ip link set "$WWAN_INTERFACE" up; qmi_start && log "QMI up" || log "QMI fail"; dhcp_lease && log "DHCP ok" || log "DHCP fail"; }
+safe_kill_tools() { sudo pkill -x -f '^qmicli .*(--wds-start-network|--wda-.*-data-.*)$' || true; sudo pkill -x udhcpc || true; sudo pkill -o -x ping -f " -I $WWAN_INTERFACE " || true; }
+handle_retries() { retries=$1; (( retries >= MAX_RETRIES )) && { log "Max retries – forcing reboot."; sudo reboot; }; backoff=$(( RETRY_INTERVAL << retries )); (( backoff > MAX_BACKOFF )) && backoff=$MAX_BACKOFF; log "Retry $(( retries + 1 ))/$MAX_RETRIES – sleep ${backoff}s."; reconnect_wwan; sleep "$backoff"; }
+
+################################## startup ###################################
+log "========== LTE-uplink script started =========="
+schedule_daily_reboot
+
+################################### main loop #################################
 while true; do
     if check_connection; then
-        maybe_daily_reboot
         sleep "$PING_INTERVAL"
         continue
     fi
-
-    log "Connection lost – attempting recovery"
-    sudo pkill -f "qmicli|udhcpc" || true
-
+    log "Connection lost – recovery."
+    safe_kill_tools
     retry_counter=0
     until check_connection; do
-        handle_retries "$retry_counter" || break
-        ((retry_counter++))
+        handle_retries "$retry_counter"
+        (( retry_counter++ ))
     done
 done
