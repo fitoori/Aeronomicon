@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 ##################################################################
 ##  ONICS - Optical Navigation and Interference Control System  ##
-##                             Mk.II                            ##
-##                  *now with multi-core support*               ##
+##                           Mk.II v0.2                         ##
+##     *now with multi-core support and arm-status logging*     ##
 ##################################################################
-# This script is under active development and may not be stable.
-# If you experience connection issues, please consider temporarily
-# reverting to ONICS 1.
 
 import argparse
 import json
@@ -28,8 +25,8 @@ STATUS_FILE   = "/home/pi/arming_status.json"
 # MAVLink I/O
 CONN_IN_PORT     = "127.0.0.1:14550"
 CONN_IN_BAUD     = "921600"
-CONN_OUT_P01     = "127.0.0.1:14540"   # T265
-CONN_OUT_P02     = "127.0.0.1:14560"   # D435i
+CONN_OUT_P01     = "127.0.0.1:14540"                                      # T265
+CONN_OUT_P02     = "127.0.0.1:14560"                                      # D435i
 CONN_OUT_P03     = "/dev/usb-FTDI_FT230X_Basic_UART_D30AAUZG-if00-port0"  # SiK Radio
 
 # RealSense device substrings we care about
@@ -167,7 +164,7 @@ def publish_logs() -> None:
                 time.sleep(1)
 
 
-# ─────────────── Arming-Status JSON Helper (NEW) ──────────────────
+# ──────────────────── Arming-Status JSON Helper  ────────────────────
 _last_armed_state = None  # module-level cache
 
 
