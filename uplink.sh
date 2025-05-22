@@ -45,26 +45,26 @@ readonly PRE_REBOOT_CHECK_SEC=45    # run arming check this many seconds prior t
 ## flight-related parameters
 readonly ARMING_STATUS_FILE="/home/pi/arming_status.json"
 readonly FRESH_THRESHOLD=600        # this value should be the maximum theoretical flight time of the vehicle (s)
-'''
-─ STALE_AS_ARMED ─ what it does and why it matters ─
 
-+----------+---------------------------+-------------------------+---------------------------+
-| Setting  | When status file is       | Benefit                 | Risk / Cost               |
-|          | missing or >10 min old    |                         |                           |
-+==========+===========================+=========================+===========================+
-| false    | Assume DISARMED → reboot  | • Box always reboots,   | • 1-in-a-million chance of|
-|(default) | proceeds                  |   restoring control     |  rebooting mid-flight if  |
-|          |                           | • Best for long ground  |  status feed dies during  |
-|          |                           |  tests & unattended use |  a short flight           |
-+----------+---------------------------+-------------------------+---------------------------+
-| true     | Assume ARMED → cancel     | • Absolute guarantee    | • If status pipeline dies |
-|          | reboot                    |   against airborne      |  vehicle may stay offline |
-|          |                           |   reboot                |  forever                  |
-+----------+---------------------------+-------------------------+---------------------------+
+#─ STALE_AS_ARMED ─ what it does and why it matters ─
 
-Choose **false** for availability (ground testing, weeks of uptime).  
-Flip to **true** only when an in-air reboot is intolerable *and* you trust the status file to stay healthy.
-'''
+#+----------+---------------------------+-------------------------+---------------------------+
+#| Setting  | When status file is       | Benefit                 | Risk / Cost               |
+#|          | missing or >10 min old    |                         |                           |
+#+==========+===========================+=========================+===========================+
+#| false    | Assume DISARMED → reboot  | • Box always reboots,   | • 1-in-a-million chance of|
+#|(default) | proceeds                  |   restoring control     |  rebooting mid-flight if  |
+#|          |                           | • Best for long ground  |  status feed dies during  |
+#|          |                           |  tests & unattended use |  a short flight           |
+#+----------+---------------------------+-------------------------+---------------------------+
+#| true     | Assume ARMED → cancel     | • Absolute guarantee    | • If status pipeline dies |
+#|          | reboot                    |   against airborne      |  vehicle may stay offline |
+#|          |                           |   reboot                |  forever                  |
+#+----------+---------------------------+-------------------------+---------------------------+
+
+# Choose **false** for availability (ground testing, weeks of uptime).  
+# Flip to **true** only when an in-air reboot is intolerable *and* you trust the status file to stay healthy.
+
 readonly STALE_AS_ARMED=false       # true ⇒ indicates whether the script should constitute a stale value as ARMED or DISARMED
 ###############################################################################
 
