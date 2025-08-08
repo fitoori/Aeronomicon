@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 ##################################################################
 ##  ONICS – Optical Navigation and Interference Control System  ##
-##                           Mk.II v0.5.2                       ##
+##                           Mk.II v0.5.3                       ##
 ##   env-tunable · auto-restart · T265 gating · WPNAV sync      ##
 ##################################################################
 """
-Bridges ArduPilot ↔ sensors ↔ SiK radio, publishes arming status,
+Bridges ArduPilot ↔ sensors/cameras ↔ SiK radio, publishes arming status,
 and keeps cruise speed in sync with an external air-density calculator.
 
 Run `./ONICS.py --help` for a complete CLI/ENV overview.
@@ -16,22 +16,27 @@ import argparse
 import json
 import logging
 import logging.handlers
+import math
 import multiprocessing as mp
 import os
+import queue
+import random
+import shutil
 import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from pymavlink import mavutil
 
 # ───────────────────────── constants ─────────────────────────
-SLEEP_FAST = 0.25          # seconds
-SLEEP_SLOW = 5.0           # seconds
-RESTART_BACKOFF_MAX = 60   # seconds
+SLEEP_FAST = 0.25            # seconds
+SLEEP_SLOW = 5.0             # seconds
+RESTART_BACKOFF_MAX = 60.0   # seconds
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 
@@ -40,20 +45,18 @@ def env_bool(key: str, default: bool) -> bool:
     val = os.getenv(key)
     if val is None:
         return default
-    return val.lower() in ("1", "true", "yes", "on")
-
+    return val.strip().lower() in ("1", "true", "yes", "on")
 
 def env_float(key: str, default: float) -> float:
+    raw = os.getenv(key, None)
     try:
-        return float(os.getenv(key, str(default)))
-    except ValueError:
+        return float(raw if raw is not None else default)
+    except (TypeError, ValueError):
         logging.warning("Invalid float for %s; using default %.3f", key, default)
         return default
 
-
 def env_path(key: str, default: str) -> str:
     return os.getenv(key, default)
-
 
 def validate_baud(baud: int) -> int:
     valid = {57600, 115200, 230400, 460800, 921600}
@@ -62,13 +65,34 @@ def validate_baud(baud: int) -> int:
         return 921600
     return baud
 
-
 def ensure_dir(path: Path) -> None:
     try:
         path.mkdir(parents=True, exist_ok=True)
     except PermissionError as exc:
         sys.exit(f"Cannot create directory {path}: {exc}")
 
+def _validate_udp_hostport(hp: str) -> str:
+    try:
+        host, port_s = hp.rsplit(":", 1)
+        port = int(port_s)
+        if not host or not (0 < port < 65536):
+            raise ValueError
+        return f"{host}:{port}"
+    except Exception:
+        sys.exit(f"Invalid UDP host:port: {hp}")
+
+def _is_serial_path(s: str) -> bool:
+    return s.startswith("/dev/")
+
+def _has_serial_baud_spec(s: str) -> bool:
+    # mavproxy serial syntax usually "/dev/ttyUSB0,57600,8N1"
+    return "," in s
+
+def _finite(v: float) -> bool:
+    return math.isfinite(v)
+
+def _jittered(v: float) -> float:
+    return max(0.5, min(RESTART_BACKOFF_MAX, v * random.uniform(0.8, 1.2)))
 
 # ───────────────────────── configuration (env-tunable) ─────────────────────────
 LOG_FILE_PATH = Path(env_path("ONICS_LOG", "/home/pi/onics.log"))
@@ -76,14 +100,14 @@ ensure_dir(LOG_FILE_PATH.parent)
 
 STATUS_FILE = Path(env_path("ONICS_ARM_JSON", "/home/pi/arming_status.json"))
 
-CONN_IN_PORT = os.getenv("ONICS_MAV_PORT", "127.0.0.1:14550")
+CONN_IN_PORT = _validate_udp_hostport(os.getenv("ONICS_MAV_PORT", "127.0.0.1:14550"))
 CONN_IN_BAUD = validate_baud(int(os.getenv("ONICS_MAV_BAUD", "921600")))
 
-CONN_OUT_P01 = os.getenv("ONICS_T265_PORT", "127.0.0.1:14540")
-CONN_OUT_P02 = os.getenv("ONICS_D4_PORT", "127.0.0.1:14560")
+CONN_OUT_P01 = _validate_udp_hostport(os.getenv("ONICS_T265_PORT", "127.0.0.1:14540"))
+CONN_OUT_P02 = _validate_udp_hostport(os.getenv("ONICS_D4_PORT", "127.0.0.1:14560"))
 CONN_OUT_P03 = os.getenv(
     "ONICS_SIK_DEV",
-    "/dev/usb-FTDI_FT230X_Basic_UART_D30AAUZG-if00-port0",
+    "/dev/usb-FTDI_FT230X_Basic_UART_D30AAUZG-if00-port0",  # Holybro/FT230X default-like path
 )
 
 T265_GATE = env_bool("ONICS_T265_GATE", True)
@@ -95,32 +119,73 @@ T265_DEBUG = env_bool("ONICS_T265_DEBUG", False)
 
 ENV_PATH = Path(env_path("ONICS_ENV_PATH", "/home/pi/.env.json"))
 CRUISE_PARAM = os.getenv("ONICS_WPNAV_PARAM", "WPNAV_SPEED")
-SYNC_PERIOD_S = int(env_float("ONICS_WPNAV_PERIOD", 10))
+SYNC_PERIOD_S = int(env_float("ONICS_WPNAV_PERIOD", 10.0))
 ENABLE_WPNAV = env_bool("ONICS_WPNAV_ENABLE", True)
 
-REALSENSE_IDS = ("T265", "D4")
+REALSENSE_IDS = ("T265", "D4", "D435", "D455")
 
-# ───────────────────────── logging ─────────────────────────
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# ───────────────────────── logging (multiprocess-safe) ─────────────────────────
+from logging.handlers import QueueHandler, QueueListener
+_log_queue: "queue.Queue[logging.LogRecord]" = queue.Queue()
+_log_listener: Optional[QueueListener] = None
 
-rot = logging.handlers.RotatingFileHandler(
-    LOG_FILE_PATH, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT
-)
-rot.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logger.addHandler(rot)
+def _utc_formatter() -> logging.Formatter:
+    fmt = logging.Formatter("%(asctime)sZ - %(levelname)s - %(processName)s - %(message)s")
+    fmt.converter = time.gmtime
+    return fmt
 
-stdout_handler = logging.StreamHandler(sys.stdout)
-stdout_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logger.addHandler(stdout_handler)
+def setup_master_logging() -> None:
+    global _log_listener
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    rot = logging.handlers.RotatingFileHandler(
+        LOG_FILE_PATH, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT
+    )
+    fmt = _utc_formatter()
+    rot.setFormatter(fmt)
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setFormatter(fmt)
+    _log_listener = QueueListener(_log_queue, rot, stdout_handler, respect_handler_level=True)
+    _log_listener.start()
 
-# ───────────────────── path helpers ─────────────────────
+def setup_worker_logging() -> None:
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    root.setLevel(logging.INFO)
+    root.addHandler(QueueHandler(_log_queue))
+
+# ───────────────────── path/helpers ─────────────────────
 SCRIPT_DIR = Path(__file__).resolve().parent
 D4_SCRIPT = SCRIPT_DIR / "d4xx_to_mavlink.py"
 T265_SCRIPT = SCRIPT_DIR / "t265_precland_apriltags.py"
 
-# ───────────────────── device enumeration helpers ─────────────────────
-def run_rs_enum() -> Optional[str]:
+def require_cmd(cmd: str) -> None:
+    if shutil.which(cmd) is None:
+        sys.exit(f"Required command not found in PATH: {cmd}")
+
+def require_file(p: Path) -> None:
+    if not p.exists():
+        sys.exit(f"Required file missing: {p}")
+    if not os.access(p, os.R_OK):
+        sys.exit(f"Required file not readable: {p}")
+
+def preflight() -> None:
+    ensure_dir(LOG_FILE_PATH.parent)
+    require_cmd("python3")
+    require_cmd("mavproxy.py")
+    require_cmd("rs-enumerate-devices")
+    require_file(T265_SCRIPT)
+    require_file(D4_SCRIPT)
+    # If SiK is a serial path, ensure it exists and has a baud spec in MAVProxy --out
+    if _is_serial_path(CONN_OUT_P03):
+        if not os.path.exists(CONN_OUT_P03.split(",", 1)[0]):
+            sys.exit(f"SiK device not present: {CONN_OUT_P03}")
+        if not _has_serial_baud_spec(CONN_OUT_P03):
+            logging.warning("SiK --out missing baud spec (e.g. /dev/ttyUSB0,57600). Current: %s", CONN_OUT_P03)
+
+# ───────────────────── rs-enumerate helpers (JSON) ─────────────────────
+def run_rs_enum_json() -> Optional[dict]:
     try:
         out = subprocess.run(
             ["rs-enumerate-devices", "--json"],
@@ -128,34 +193,65 @@ def run_rs_enum() -> Optional[str]:
             text=True,
             check=True,
         ).stdout
-        return out
-    except (subprocess.SubprocessError, FileNotFoundError) as exc:
+        return json.loads(out)
+    except (subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError) as exc:
         logging.error("rs-enumerate-devices failed: %s", exc)
         return None
 
-
 def is_device_connected(prefix: str) -> bool:
-    out = run_rs_enum()
-    if not out:
+    data = run_rs_enum_json()
+    if not data:
         return False
-    return prefix in out
-
+    devices = data.get("devices", [])
+    for dev in devices:
+        name = str(dev.get("name", "")).upper()
+        pline = str(dev.get("product-line", "")).upper()
+        if name.startswith(prefix.upper()) or pline.startswith(prefix.upper()):
+            return True
+    return False
 
 def enumerate_devices() -> None:
-    out = run_rs_enum()
-    if not out:
+    data = run_rs_enum_json()
+    if not data:
         print("RealSense enumeration failed.")
         return
-    lines = [ln.strip() for ln in out.splitlines() if any(tag in ln for tag in REALSENSE_IDS)]
-    if lines:
+    devices = data.get("devices", [])
+    hits = [
+        f'{d.get("name","?")} | {d.get("serial_number","?")} | {d.get("product-line","?")}'
+        for d in devices
+        if any(tag in str(d.get("name","")) or tag in str(d.get("product-line","")) for tag in REALSENSE_IDS)
+    ]
+    if hits:
         print("Detected RealSense devices:")
-        for ln in lines:
-            print(" ", ln)
+        for h in hits:
+            print(" ", h)
     else:
         print("No relevant RealSense devices found.")
 
+# ───────────────────── subprocess utilities ─────────────────────
+def _popen(cmd: List[str]) -> subprocess.Popen:
+    return subprocess.Popen(
+        cmd,
+        start_new_session=True,          # new process group
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+    )
+
+def _kill_proc(proc: subprocess.Popen, timeout: float = 2.5) -> None:
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+            proc.wait(timeout=timeout)
+        except Exception:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except Exception:
+                pass
+
 # ───────────────────── MAVProxy bridge (self-restarting) ─────────────────────
 def mavproxy_bridge() -> None:
+    setup_worker_logging()
     cmd = [
         "mavproxy.py",
         f"--master={CONN_IN_PORT}",
@@ -167,7 +263,7 @@ def mavproxy_bridge() -> None:
     backoff = 1.0
     while True:
         try:
-            proc = subprocess.Popen(cmd)
+            proc = _popen(cmd)
             ret = proc.wait()
             logging.warning("MAVProxy exited (%s); restart in %.1fs", ret, backoff)
         except FileNotFoundError as exc:
@@ -176,10 +272,11 @@ def mavproxy_bridge() -> None:
         except Exception as exc:
             logging.error("MAVProxy launcher error: %s", exc)
         time.sleep(backoff)
-        backoff = min(backoff * 2, RESTART_BACKOFF_MAX)
+        backoff = _jittered(min(backoff * 2.0, RESTART_BACKOFF_MAX))
 
 # ─────────────── generic RealSense-bridge launcher ───────────────
-def device_loop(tag: str, script: Path, udp: str, extra_flags: List[str] | None = None) -> None:
+def device_loop(tag: str, script: Path, udp: str, extra_flags: Optional[List[str]] = None) -> None:
+    setup_worker_logging()
     extra_flags = extra_flags or []
     proc: Optional[subprocess.Popen] = None
     backoff = 1.0
@@ -187,26 +284,24 @@ def device_loop(tag: str, script: Path, udp: str, extra_flags: List[str] | None 
         try:
             if is_device_connected(tag):
                 if proc is None or proc.poll() is not None:
-                    cmd = ["python3", str(script), "--connect", f"udp:{udp}", *extra_flags]
-                    proc = subprocess.Popen(cmd)
+                    cmd = [sys.executable, str(script), "--connect", f"udp:{udp}", *extra_flags]
+                    proc = _popen(cmd)
                     logging.info("%s bridge started (PID %d)", tag, proc.pid)
                     backoff = 1.0
                 time.sleep(SLEEP_SLOW)
             else:
                 if proc:
                     logging.info("%s disconnected – terminating bridge", tag)
-                    proc.terminate()
-                    proc.wait(timeout=2)
+                    _kill_proc(proc)
                     proc = None
                 time.sleep(SLEEP_SLOW)
         except Exception as exc:
             logging.error("%s bridge loop error: %s", tag, exc)
             if proc:
-                proc.terminate()
-                proc.wait(timeout=2)
+                _kill_proc(proc)
                 proc = None
             time.sleep(backoff)
-            backoff = min(backoff * 2, RESTART_BACKOFF_MAX)
+            backoff = _jittered(min(backoff * 2.0, RESTART_BACKOFF_MAX))
 
 def run_d4xx() -> None:
     device_loop("D4", D4_SCRIPT, CONN_OUT_P02)
@@ -228,6 +323,7 @@ def run_t265() -> None:
 
 # ───────────────────────── WPNAV synchroniser ─────────────────────────
 def cruise_speed_sync() -> None:
+    setup_worker_logging()
     if not ENABLE_WPNAV:
         logging.info("WPNAV sync disabled")
         return
@@ -239,11 +335,11 @@ def cruise_speed_sync() -> None:
         return
 
     last_val: Optional[float] = None
-    last_push_time = time.time()
+    last_push_time = time.monotonic()
     while True:
         try:
-            now = time.time()
-            if now - last_push_time >= SYNC_PERIOD_S:
+            now = time.monotonic()
+            if (now - last_push_time) >= SYNC_PERIOD_S:
                 last_push_time = now
                 try:
                     with open(ENV_PATH, "r", encoding="utf-8") as fp:
@@ -252,12 +348,25 @@ def cruise_speed_sync() -> None:
                     logging.debug("ENV read error: %s", exc)
                     continue
 
-                if val != last_val or (now % 300 < SYNC_PERIOD_S):  # push at least every 5 min
+                if not _finite(val) or val <= 0.0 or val > 300_000.0:
+                    logging.warning("Ignoring invalid %s value: %s", CRUISE_PARAM, val)
+                    continue
+
+                # push at least every 5 min (300s)
+                push_due = (last_val is None) or (val != last_val) or ((now % 300.0) < SYNC_PERIOD_S)
+                if push_due:
+                    try:
+                        master.wait_heartbeat(timeout=3)
+                    except Exception:
+                        logging.warning("No heartbeat; skipping param push")
+                        time.sleep(SLEEP_FAST)
+                        continue
+
                     master.mav.param_set_send(
                         master.target_system,
                         master.target_component,
-                        CRUISE_PARAM.encode(),
-                        val,
+                        CRUISE_PARAM.encode("ascii", "ignore"),
+                        float(val),
                         mavutil.mavlink.MAV_PARAM_TYPE_REAL32,
                     )
                     logging.info("Set %s → %.1f cm/s", CRUISE_PARAM, val)
@@ -283,6 +392,7 @@ def _write_arm_json(armed: bool) -> None:
     tmp.replace(STATUS_FILE)
 
 def monitor_arming() -> None:
+    setup_worker_logging()
     global _last_arm_state
     while True:
         try:
@@ -305,31 +415,59 @@ def monitor_arming() -> None:
             time.sleep(SLEEP_SLOW)
 
 # ───────────────────────── process supervision ─────────────────────────
-def spawn(target, name: str) -> mp.Process:
-    p = mp.Process(target=target, name=name, daemon=True)
-    p.start()
-    logging.info("Launched %s (PID %d)", name, p.pid)
-    return p
+@dataclass
+class ProcSpec:
+    name: str
+    target: Callable[[], None]
+    process: Optional[mp.Process] = None
+    backoff: float = 1.0
+    last_restart: float = 0.0
 
-def supervise(procs: List[mp.Process]) -> None:
+def _proc_wrapper(fn: Callable[[], None]) -> Callable[[], None]:
+    def wrapped() -> None:
+        setup_worker_logging()
+        fn()
+    return wrapped
+
+def spawn(spec: ProcSpec) -> ProcSpec:
+    p = mp.Process(target=_proc_wrapper(spec.target), name=spec.name, daemon=True)
+    p.start()
+    logging.info("Launched %s (PID %d)", spec.name, p.pid)
+    spec.process = p
+    return spec
+
+def supervise(specs: List[ProcSpec]) -> None:
+    # simple status log on interval
+    next_status = time.monotonic() + 30.0
     while True:
-        for i, p in enumerate(procs):
-            if not p.is_alive():
-                logging.warning("%s died; restarting", p.name)
-                procs[i] = spawn(p._target, p.name)  # type: ignore
-        time.sleep(1)
+        now = time.monotonic()
+        for spec in specs:
+            p = spec.process
+            if p is None or not p.is_alive():
+                if p is not None:
+                    logging.warning("%s died (exit %s); restarting after %.1fs",
+                                    spec.name, p.exitcode, spec.backoff)
+                time.sleep(spec.backoff)
+                spec = spawn(spec)
+                spec.last_restart = now
+                spec.backoff = _jittered(min(spec.backoff * 2.0, RESTART_BACKOFF_MAX))
+        if now >= next_status:
+            alive = ", ".join(f"{s.name}:{'up' if s.process and s.process.is_alive() else 'down'}" for s in specs)
+            logging.info("Supervisor status: %s", alive)
+            next_status = now + 30.0
+        time.sleep(1.0)
 
 # ──────────────────────────── CLI / main ────────────────────────────
 _HELP_EPILOG = f"""
 ENVIRONMENT VARIABLES (defaults in brackets)
 ————————————————————————————————————————————————
-  ONICS_LOG             Log file path [{LOG_FILE_PATH}]
-  ONICS_ARM_JSON        Arming-status JSON [{STATUS_FILE}]
+  ONICS_LOG             Log file path [{str(LOG_FILE_PATH)}]
+  ONICS_ARM_JSON        Arming-status JSON [{str(STATUS_FILE)}]
   ONICS_MAV_PORT        MAVLink input endpoint [{CONN_IN_PORT}]
   ONICS_MAV_BAUD        MAVLink baudrate [{CONN_IN_BAUD}]
   ONICS_T265_PORT       UDP out port for T265 [{CONN_OUT_P01}]
   ONICS_D4_PORT         UDP out port for D4XX [{CONN_OUT_P02}]
-  ONICS_SIK_DEV         Serial device for SiK radio [{CONN_OUT_P03}]
+  ONICS_SIK_DEV         Serial device for SiK radio or MAVProxy endpoint [{CONN_OUT_P03}]
 
   — T265 altitude gate —
     ONICS_T265_GATE           Enable altitude gate [{T265_GATE}]
@@ -338,7 +476,7 @@ ENVIRONMENT VARIABLES (defaults in brackets)
     ONICS_T265_DEBUG          Extra verbose RealSense logs
 
   — WPNAV synchroniser —
-    ONICS_ENV_PATH       JSON file produced by air-density calc [{ENV_PATH}]
+    ONICS_ENV_PATH       JSON file produced by air-density calc [{str(ENV_PATH)}]
     ONICS_WPNAV_PARAM    FCU parameter to write [{CRUISE_PARAM}]
     ONICS_WPNAV_PERIOD   Seconds between syncs [{SYNC_PERIOD_S}]
     ONICS_WPNAV_ENABLE   Master on/off switch [{ENABLE_WPNAV}]
@@ -359,6 +497,8 @@ EXAMPLES
 
 def main() -> None:
     mp.set_start_method("fork", force=True)
+    setup_master_logging()
+    preflight()
 
     ap = argparse.ArgumentParser(
         prog="ONICS",
@@ -374,38 +514,57 @@ def main() -> None:
     ap.add_argument("-d", "--disable-t265", action="store_true")
     ap.add_argument("-t", "--disable-d4xx", action="store_true")
     ap.add_argument("-s", "--sik-only", action="store_true")
-    ap.add_argument("-V", "--version", action="version", version="ONICS Mk II v0.5.2")
+    ap.add_argument("-V", "--version", action="version", version="ONICS Mk II v0.5.3")
     args = ap.parse_args()
+
+    # Configuration dump (once)
+    logging.info(
+        "Config: in=%s baud=%d; out_t265=udp:%s out_d4=udp:%s out_sik=%s; env_path=%s; wpnav=%s/%ss; gate=%s hi=%.2f lo=%.2f on=%.2f",
+        CONN_IN_PORT, CONN_IN_BAUD, CONN_OUT_P01, CONN_OUT_P02, CONN_OUT_P03, str(ENV_PATH),
+        CRUISE_PARAM, SYNC_PERIOD_S, T265_GATE, T265_GATE_HI, T265_GATE_LO, T265_GATE_ON
+    )
 
     if args.enumerate:
         enumerate_devices()
+        if _log_listener:
+            _log_listener.stop()
         return
 
     t265_ok = not (args.disable_t265 or args.sik_only)
     d4xx_ok = not (args.disable_d4xx or args.sik_only)
 
-    procs: List[mp.Process] = [
-        spawn(mavproxy_bridge, "mavproxy"),
-        spawn(monitor_arming, "arming"),
-        spawn(cruise_speed_sync, "wpnav"),
+    specs: List[ProcSpec] = [
+        ProcSpec("mavproxy", mavproxy_bridge),
+        ProcSpec("arming", monitor_arming),
+        ProcSpec("wpnav", cruise_speed_sync),
     ]
     if t265_ok:
-        procs.append(spawn(run_t265, "t265"))
+        specs.append(ProcSpec("t265", run_t265))
     if d4xx_ok:
-        procs.append(spawn(run_d4xx, "d4xx"))
+        specs.append(ProcSpec("d4xx", run_d4xx))
+
+    # initial spawn
+    specs = [spawn(s) for s in specs]
 
     def _shutdown(signo, _frm):
         logging.info("Shutdown signal %d", signo)
-        for p in procs:
-            if p.is_alive():
+        for s in specs:
+            p = s.process
+            if p and p.is_alive():
                 p.terminate()
-                p.join(timeout=2)
+                p.join(timeout=5)
+        if _log_listener:
+            _log_listener.stop()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    supervise(procs)
+    try:
+        supervise(specs)
+    finally:
+        if _log_listener:
+            _log_listener.stop()
 
 if __name__ == "__main__":
     main()
