@@ -13,6 +13,7 @@ import time
 import math as m
 import threading
 import argparse
+import builtins
 
 import numpy as np
 import cv2
@@ -31,6 +32,19 @@ except ImportError:
         "Please download the Python wrapper for apriltag3 (apriltags3.py) and "
         "put it in the same folder as this script or add the directory path to PYTHONPATH."
     )
+
+
+_original_print = builtins.print
+
+
+def _print_with_timestamp(*args, **kwargs):
+    """Print helper that prefixes output with a timestamp."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    _original_print(f"{timestamp}", *args, **kwargs)
+
+
+# Replace the built-in print with the timestamped variant.
+builtins.print = _print_with_timestamp
 
 # ------------------------------
 # Defaults & configuration
