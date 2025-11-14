@@ -1,0 +1,13 @@
+[Unit]
+Description=MAVProxy telemetry bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env mavproxy.py --master=127.0.0.1:14550 --out=/dev/ttyUSB0
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
