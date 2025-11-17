@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 ##################################################################
 ##  ONICS – Optical Navigation and Interference Control System  ##
 ##                            T265 Node                         ##
@@ -14,6 +15,7 @@ import math as m
 import threading
 import argparse
 import builtins
+from datetime import datetime
 
 import numpy as np
 import cv2
@@ -25,26 +27,26 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from dronekit import connect, VehicleMode
 from pymavlink import mavutil
 
+# ---------- Timestamp all prints ----------
+def _now_ts():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+_builtin_print = builtins.print
+def print(*args, **kwargs):
+    _builtin_print(f"[{_now_ts()}]", *args, **kwargs)
+# -----------------------------------------
+
 try:
     import apriltags3
 except ImportError:
     raise ImportError(
-        "Please download the Python wrapper for apriltag3 (apriltags3.py) and "
-        "put it in the same folder as this script or add the directory path to PYTHONPATH."
+        "Please download apriltags3.py and put it beside this script or add it to PYTHONPATH."
     )
 
-
-_original_print = builtins.print
-
-
-def _print_with_timestamp(*args, **kwargs):
-    """Print helper that prefixes output with a timestamp."""
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    _original_print(f"{timestamp}", *args, **kwargs)
-
-
-# Replace the built-in print with the timestamped variant.
-builtins.print = _print_with_timestamp
+try:
+    import psutil  # optional, improves dynamic tuning
+    _HAVE_PSUTIL = True
+except Exception:
+    _HAVE_PSUTIL = False
 
 # ------------------------------
 # Defaults & configuration
@@ -88,8 +90,7 @@ pipe = None
 # pose data confidence: 0x0 - Failed / 0x1 - Low / 0x2 - Medium / 0x3 - High
 pose_data_confidence_level = ('Failed', 'Low', 'Medium', 'High')
 
-# AprilTag detection configuration
-# Target the specific tag: tag41_12_00113 => family Standard41h12, id=113
+# AprilTag detection configuration: tag41_12_00113
 APRILTAG_FAMILY = 'tagStandard41h12'
 tag_landing_id = 113
 tag_landing_size = 0.144     # meters (edge length incl. border)
@@ -175,7 +176,7 @@ else:
 # ------------------------------
 at_detector = apriltags3.Detector(
     searchpath=['apriltags'],
-    families=APRILTAG_FAMILY,       # <<--- Ensure family supports Standard41h12
+    families=APRILTAG_FAMILY,       # <<--- tagStandard41h12
     nthreads=1,
     quad_decimate=1.0,
     quad_sigma=0.0,
@@ -381,7 +382,7 @@ def init_rectification_and_params(pipeline):
     D_right = fisheye_distortion(intrinsics["right"])
 
     (R, T) = get_extrinsics(streams["left"], streams["right"])
-    # Stereo rectification parameters
+
     window_size = 5
     min_disp = 16
     num_disp = 112 - min_disp
@@ -489,11 +490,165 @@ H_camera_tag = None
 is_landing_tag_detected = False
 heading_north_yaw = None
 
-# Background jobs
+# ------------------------------
+# Performance tracking & dynamic pose rate
+# ------------------------------
+perf_lock = threading.Lock()
+loop_dt_ema = None  # seconds, exponential moving average
+_ema_alpha = 0.1    # smoothing for loop time EMA
+
+def _perf_update_loop_dt(dt):
+    """Update EMA of main-loop iteration time."""
+    global loop_dt_ema
+    with perf_lock:
+        if dt <= 0:
+            return
+        if loop_dt_ema is None:
+            loop_dt_ema = dt
+        else:
+            loop_dt_ema = _ema_alpha * dt + (1 - _ema_alpha) * loop_dt_ema
+
+def get_performance_snapshot():
+    """Return a dict with current perf snapshot."""
+    with perf_lock:
+        dt = loop_dt_ema
+    loop_fps = (1.0 / dt) if (dt and dt > 0) else None
+    cpu = psutil.cpu_percent(interval=None) if _HAVE_PSUTIL else None
+    return {"loop_dt_ema_s": dt, "loop_fps": loop_fps, "cpu_percent": cpu}
+
+def set_vision_rate(new_hz: float):
+    """
+    Force the VISION_POSITION_ESTIMATE message rate.
+    Can be called at runtime.
+    """
+    global vision_msg_hz, sched
+    try:
+        new_hz = float(new_hz)
+        if new_hz <= 0:
+            raise ValueError("new_hz must be > 0")
+        vision_msg_hz = new_hz
+        interval_s = max(1.0 / vision_msg_hz, 0.001)
+        job = sched.get_job('vision_job')
+        if job is None:
+            sched.add_job(send_vision_position_message, 'interval',
+                          seconds=interval_s, id='vision_job', replace_existing=True)
+        else:
+            sched.reschedule_job('vision_job', trigger='interval', seconds=interval_s)
+        print(f"INFO: Adjusted vision message rate to {vision_msg_hz:.2f} Hz "
+              f"(interval {interval_s*1000:.1f} ms).")
+        return True
+    except Exception as e:
+        print(f"WARN: Failed to set vision message rate: {e}")
+        return False
+
+# Dynamic tuner configuration/state
+_dynamic_cfg = {
+    "enabled": False,
+    "min_hz": 5.0,
+    "max_hz": 50.0,
+    "target_fraction": 0.5,     # aim for 50% of loop FPS
+    "hysteresis": 0.20,          # 20% change required before rescheduling
+    "check_period_s": 2.0,
+    "cpu_high_pct": 85.0,        # if psutil present and above this, bias down
+    "cpu_low_pct": 40.0
+}
+_dynamic_thread = None
+
+def _dynamic_pose_rate_worker():
+    """Background worker that adapts pose publish rate to system performance."""
+    # Prime psutil measurement if available
+    if _HAVE_PSUTIL:
+        _ = psutil.cpu_percent(interval=None)
+
+    while not shutdown_event.is_set():
+        if not _dynamic_cfg["enabled"]:
+            time.sleep(0.2)
+            continue
+
+        snap = get_performance_snapshot()
+        dt = snap["loop_dt_ema_s"]
+        loop_fps = snap["loop_fps"]
+        cpu = snap["cpu_percent"]
+
+        if dt is None or loop_fps is None or loop_fps <= 0:
+            time.sleep(_dynamic_cfg["check_period_s"])
+            continue
+
+        # Base target from loop capacity
+        target = loop_fps * float(_dynamic_cfg["target_fraction"])
+
+        # Apply CPU bias if psutil is available
+        if _HAVE_PSUTIL and cpu is not None:
+            if cpu >= _dynamic_cfg["cpu_high_pct"]:
+                target *= 0.75  # back off 25% under high CPU
+            elif cpu <= _dynamic_cfg["cpu_low_pct"]:
+                target *= 1.10  # gently increase 10% if CPU is cool
+
+        # Clamp within bounds
+        target_hz = max(float(_dynamic_cfg["min_hz"]), min(float(_dynamic_cfg["max_hz"]), float(target)))
+
+        current_hz = float(vision_msg_hz)
+        # Avoid thrashing with hysteresis band
+        if current_hz <= 0 or abs(target_hz - current_hz) / current_hz >= float(_dynamic_cfg["hysteresis"]):
+            set_vision_rate(target_hz)
+            print(f"INFO: Dynamic pose rate tuner -> loop_fps={loop_fps:.1f} Hz,"
+                  f" cpu={('%.0f%%' % cpu) if cpu is not None else 'n/a'},"
+                  f" new vision_msg_hz={target_hz:.1f}")
+
+        time.sleep(float(_dynamic_cfg["check_period_s"]))
+
+def set_dynamic_pose_rate(enable: bool,
+                          min_hz: float = 5.0,
+                          max_hz: float = 50.0,
+                          target_fraction: float = 0.5,
+                          hysteresis: float = 0.20,
+                          check_period_s: float = 2.0,
+                          cpu_high_pct: float = 85.0,
+                          cpu_low_pct: float = 40.0):
+    """
+    Enable/disable dynamic tuning of VISION_POSITION_ESTIMATE rate based on system performance.
+
+    Args:
+        enable: True to start/continue tuning, False to pause.
+        min_hz, max_hz: Lower and upper bounds for the publish rate.
+        target_fraction: Desired fraction of loop FPS to use for vision publishing.
+        hysteresis: Fractional change required before rescheduling to avoid oscillation.
+        check_period_s: How often to re-evaluate and adjust.
+        cpu_high_pct, cpu_low_pct: Optional CPU thresholds (if psutil installed) to bias the target.
+
+    Usage:
+        set_dynamic_pose_rate(True, min_hz=10, max_hz=40, target_fraction=0.6)
+        set_dynamic_pose_rate(False)   # to stop auto-tuning
+    """
+    global _dynamic_thread
+    _dynamic_cfg.update({
+        "enabled": bool(enable),
+        "min_hz": float(min_hz),
+        "max_hz": float(max_hz),
+        "target_fraction": float(target_fraction),
+        "hysteresis": float(hysteresis),
+        "check_period_s": float(check_period_s),
+        "cpu_high_pct": float(cpu_high_pct),
+        "cpu_low_pct": float(cpu_low_pct),
+    })
+    print("INFO: Dynamic pose rate config set:", _dynamic_cfg)
+
+    # Spawn worker if needed
+    if (_dynamic_thread is None) or (not _dynamic_thread.is_alive()):
+        _dynamic_thread = threading.Thread(target=_dynamic_pose_rate_worker, daemon=True)
+        _dynamic_thread.start()
+        print("INFO: Dynamic pose rate worker started.")
+
+# ------------------------------
+# Background jobs (with IDs for reschedule)
+# ------------------------------
 sched = BackgroundScheduler()
-sched.add_job(send_vision_position_message, 'interval', seconds=max(1.0/vision_msg_hz, 0.001))
-sched.add_job(send_confidence_level_dummy_message, 'interval', seconds=max(1.0/confidence_msg_hz, 0.001))
-sched.add_job(send_land_target_message, 'interval', seconds=max(1.0/landing_target_msg_hz, 0.001))
+sched.add_job(send_vision_position_message, 'interval',
+              seconds=max(1.0/vision_msg_hz, 0.001), id='vision_job', replace_existing=True)
+sched.add_job(send_confidence_level_dummy_message, 'interval',
+              seconds=max(1.0/confidence_msg_hz, 0.001), id='confidence_job', replace_existing=True)
+sched.add_job(send_land_target_message, 'interval',
+              seconds=max(1.0/landing_target_msg_hz, 0.001), id='landing_job', replace_existing=True)
 
 if scale_calib_enable:
     scale_update_thread = threading.Thread(target=scale_update, daemon=True)
@@ -507,14 +662,14 @@ if compass_enabled == 1:
 print("INFO: Starting main loop...")
 
 # ------------------------------
-# Main loop with resilient RealSense handling
+# Main loop with resilient RealSense handling + perf tracking
 # ------------------------------
 try:
     while not shutdown_event.is_set():
+        iter_start = time.time()
         try:
             frames = pipe.wait_for_frames()
         except Exception as e:
-            # Any failure fetching frames -> attempt restart unless shutting down
             print(f"WARN: RealSense frames error: {e}")
             if shutdown_event.is_set():
                 break
@@ -605,7 +760,7 @@ try:
                 break
             continue
 
-        # AprilTag detection (family tagStandard41h12), target id=113
+        # AprilTag detection
         tags = []
         try:
             tags = at_detector.detect(center_undistorted[tag_image_source],
@@ -626,7 +781,7 @@ try:
                     H_camera_tag[2][3] = float(tag.pose_t[2])
                     print(f"INFO: Detected landing tag {tag.tag_id} relative to camera at "
                           f"x:{H_camera_tag[0][3]:.3f}, y:{H_camera_tag[1][3]:.3f}, z:{H_camera_tag[2][3]:.3f}")
-                    break  # We only care about the landing tag
+                    break  # Only care about the landing tag
 
         # Visualization
         if visualization == 1:
@@ -656,6 +811,10 @@ try:
             except Exception as e:
                 print(f"WARN: Visualization error: {e}")
 
+        # ---- Update performance metrics at end of loop ----
+        iter_end = time.time()
+        _perf_update_loop_dt(iter_end - iter_start)
+
 except Exception as e:
     print("ERROR:", e)
 finally:
@@ -680,3 +839,4 @@ finally:
         pass
     print("INFO: RealSense pipeline and vehicle closed. Exiting.")
     sys.exit(0)
+
