@@ -10,6 +10,8 @@ have been removed – run MAVProxy as a separate service.
 
 Environment variables (defaults in brackets):
   ONICS_LOG             Log file path [/home/pi/onics.log]
+  ONICS_ARM_JSON        Arming-status JSON [/home/pi/arming_status.json]
+  ONICS_MAV_PORT        MAVLink input for arming monitor [127.0.0.1:14550]
   ONICS_T265_PORT       UDP out port for T265 [127.0.0.1:14540]
   ONICS_D4_PORT         UDP out port for D4XX [127.0.0.1:14560]
 
@@ -21,6 +23,7 @@ T‑265 gate:
 
 Runtime flags:
   -e / --enumerate      List connected RealSense devices and exit
+  -a / --disable-arming Skip writing arming-status JSON
   -d / --disable-t265   Skip launching the T265 helper
   -t / --disable-d4xx   Skip launching the D4XX helper
 """
@@ -41,8 +44,13 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
+
+# ───────────────────────── cadence constants ─────────────────────────
+SLEEP_FAST = 0.25
+SLEEP_SLOW = 5.0
 
 # ───────────────────────── helper functions ─────────────────────────
 def env_bool(key: str, default: bool) -> bool:
@@ -72,6 +80,17 @@ def ensure_dir(path: Path) -> None:
     except PermissionError as exc:
         sys.exit(f"Cannot create directory {path}: {exc}")
 
+def _validate_udp_hostport(hp: str) -> str:
+    """Validate a UDP host:port string."""
+    try:
+        host, port_s = hp.rsplit(":", 1)
+        port = int(port_s)
+        if not host or not (0 < port < 65536):
+            raise ValueError
+        return f"{host}:{port}"
+    except Exception:
+        sys.exit(f"Invalid UDP host:port: {hp}")
+
 def _finite(v: float) -> bool:
     """Check for finite floats."""
     return not (v is None or v != v or v in (float("inf"), float("-inf")))
@@ -84,6 +103,13 @@ def _jittered(v: float) -> float:
 # ───────────────────────── configuration ─────────────────────────
 LOG_FILE_PATH = Path(env_path("ONICS_LOG", "/home/pi/onics.log"))
 ensure_dir(LOG_FILE_PATH.parent)
+
+# Arming-status output for uplink/reboot coordination
+STATUS_FILE = Path(env_path("ONICS_ARM_JSON", "/home/pi/arming_status.json"))
+ensure_dir(STATUS_FILE.parent)
+
+# MAVLink input used only for arming status
+CONN_IN_PORT = _validate_udp_hostport(os.getenv("ONICS_MAV_PORT", "127.0.0.1:14550"))
 
 # UDP endpoints for the RealSense bridges
 CONN_OUT_P01 = os.getenv("ONICS_T265_PORT", "127.0.0.1:14540")
@@ -153,6 +179,7 @@ def require_file(p: Path) -> None:
 def preflight() -> None:
     """Perform pre‑flight checks: ensure dependencies and helper scripts exist."""
     ensure_dir(LOG_FILE_PATH.parent)
+    ensure_dir(STATUS_FILE.parent)
     require_cmd("python3")
     require_cmd("rs-enumerate-devices")
     require_file(T265_SCRIPT)
@@ -282,6 +309,46 @@ def run_t265() -> None:
     ]
     device_loop("T265", T265_SCRIPT, CONN_OUT_P01, flags)
 
+# ───────────────────────── arming-status monitor ─────────────────────────
+from pymavlink import mavutil
+
+_last_arm_state: Optional[bool] = None
+
+def _write_arm_json(armed: bool) -> None:
+    tmp = STATUS_FILE.with_suffix(".tmp")
+    payload: Dict[str, object] = {
+        "armed": armed,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    with open(tmp, "w", encoding="utf-8") as fp:
+        json.dump(payload, fp)
+        fp.flush()
+        os.fsync(fp.fileno())
+    tmp.replace(STATUS_FILE)
+
+def monitor_arming() -> None:
+    setup_worker_logging()
+    global _last_arm_state
+    while True:
+        try:
+            mav = mavutil.mavlink_connection(f"udp:{CONN_IN_PORT}", input=False)
+            mav.wait_heartbeat(timeout=10)
+            while True:
+                hb = mav.recv_match(type="HEARTBEAT", blocking=True, timeout=2)
+                if hb is None:
+                    break
+                armed = bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+                if armed != _last_arm_state:
+                    _last_arm_state = armed
+                    try:
+                        _write_arm_json(armed)
+                        logging.info("Armed state → %s", armed)
+                    except OSError as exc:
+                        logging.error("Arming JSON write failed: %s", exc)
+        except Exception as exc:
+            logging.error("Arming monitor error: %s", exc)
+            time.sleep(SLEEP_SLOW)
+
 # ───────────────────── process supervision ─────────────────────
 @dataclass
 class ProcSpec:
@@ -348,6 +415,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("-e", "--enumerate", action="store_true", help="List connected RealSense devices and exit")
+    ap.add_argument("-a", "--disable-arming", action="store_true", help="Skip writing arming-status JSON")
     ap.add_argument("-d", "--disable-t265", action="store_true", help="Skip launching the T265 helper")
     ap.add_argument("-t", "--disable-d4xx", action="store_true", help="Skip launching the D4xx helper")
     ap.add_argument("-V", "--version", action="version", version="ONICS‑lite v0.1.0")
@@ -355,7 +423,8 @@ def main() -> None:
 
     # dump config once
     logging.info(
-        "Config: out_t265=udp:%s out_d4=udp:%s; gate=%s hi=%.2f lo=%.2f on=%.2f",
+        "Config: in_mav=udp:%s status=%s out_t265=udp:%s out_d4=udp:%s; gate=%s hi=%.2f lo=%.2f on=%.2f",
+        CONN_IN_PORT, STATUS_FILE,
         CONN_OUT_P01, CONN_OUT_P02,
         T265_GATE, T265_GATE_HI, T265_GATE_LO, T265_GATE_ON
     )
@@ -368,6 +437,8 @@ def main() -> None:
 
     # build process specs list
     specs: List[ProcSpec] = []
+    if not args.disable_arming:
+        specs.append(ProcSpec("arming", monitor_arming))
     if not args.disable_t265:
         specs.append(ProcSpec("t265", run_t265))
     if not args.disable_d4xx:
