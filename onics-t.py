@@ -7,6 +7,13 @@
 ##                T265-to-EKF2 + AprilTag Landing               ##
 ##################################################################
 
+"""
+ONICS‑T – T265-to-MAVLink bridge used by ONICS‑lite.
+
+This wrapper is designed to be supervised by ONICS‑lite (onlcs-lite.py)
+but remains runnable on its own for debugging or standalone use.
+"""
+
 import sys
 import os
 import signal
