@@ -32,6 +32,7 @@ readonly LOG_MAX_BYTES=$((1 * 1024 * 1024))            # rotate at 1 MiB
 readonly PING_TARGET="dataplicity.com"                 # website to ping when testing internet connectivity
 readonly WWAN_INTERFACE="wwan0"                        # LTE interface as parsed by ifconfig
 readonly APN="hologram"                                # APN to be passed to qmicli
+readonly QMI_TIMEOUT=30                                 # seconds before giving up on qmicli startup
 
 ## persistency-related parameters
 readonly PING_INTERVAL=300          # time between health checks (s)
@@ -164,10 +165,24 @@ discover_wdm() {
         | grep -o 'cdc-wdm[0-9]*' || echo "cdc-wdm0"
 }
 toggle_raw_ip() { f="/sys/class/net/$WWAN_INTERFACE/qmi/raw_ip"; [[ -w $f ]] && echo Y | sudo tee "$f" >/dev/null || log "raw_ip toggle unavailable"; }
-qmi_start() { sudo qmicli -p -d "/dev/$(discover_wdm)" --device-open-net='net-raw-ip|net-no-qos-header' --wds-start-network="apn='$APN',ip-type=4" --client-no-release-cid; }
+qmi_start() { timeout "$QMI_TIMEOUT" sudo qmicli -p -d "/dev/$(discover_wdm)" --device-open-net='net-raw-ip|net-no-qos-header' --wds-start-network="apn='$APN',ip-type=4" --client-no-release-cid; }
 dhcp_lease() { timeout 20s sudo udhcpc -q -i "$WWAN_INTERFACE" &>/dev/null; }
 check_connection() { loss=$(ping -I "$WWAN_INTERFACE" -c 3 -W 3 "$PING_TARGET" | awk -F', ' '/packet loss/{print $(NF-2)+0}' || echo 100); (( loss >= 100 )) && { log "Ping FAIL – ${loss}%."; return 1; }; log "Ping OK – ${loss}%."; }
-reconnect_wwan() { log "Re-initialising $WWAN_INTERFACE…"; sudo ip link set "$WWAN_INTERFACE" down; toggle_raw_ip; sudo ip link set "$WWAN_INTERFACE" up; qmi_start && log "QMI up" || log "QMI fail"; dhcp_lease && log "DHCP ok" || log "DHCP fail"; }
+reconnect_wwan() {
+    log "Re-initialising $WWAN_INTERFACE…"
+    sudo ip link set "$WWAN_INTERFACE" down
+    toggle_raw_ip
+    sudo ip link set "$WWAN_INTERFACE" up
+
+    if qmi_start; then
+        log "QMI up"
+    else
+        status=$?
+        log "QMI fail (exit $status)"
+    fi
+
+    dhcp_lease && log "DHCP ok" || log "DHCP fail"
+}
 safe_kill_tools() { sudo pkill -x -f '^qmicli .*(--wds-start-network|--wda-.*-data-.*)$' || true; sudo pkill -x udhcpc || true; sudo pkill -o -x ping -f " -I $WWAN_INTERFACE " || true; }
 handle_retries() { retries=$1; (( retries >= MAX_RETRIES )) && { log "Max retries – forcing reboot."; sudo reboot; }; backoff=$(( RETRY_INTERVAL << retries )); (( backoff > MAX_BACKOFF )) && backoff=$MAX_BACKOFF; log "Retry $(( retries + 1 ))/$MAX_RETRIES – sleep ${backoff}s."; reconnect_wwan; sleep "$backoff"; }
 
