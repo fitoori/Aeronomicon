@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 ONICS‑lite – RealSense supervisor
---------------------------------
+---------------------------------
 Based on ONICS2.py (Mk.II v0.5.3), this trimmed‑down version
 runs only the RealSense bridges for the T‑265 and D4xx devices.
 It watches for cameras connecting/disconnecting and restarts the
 helper scripts when needed.  MAVProxy and cruise‑speed syncing
-have been removed – run MAVProxy as a separate service.
+have been removed – run MAVProxy as a separate service.  The
+T‑265 bridge uses the dedicated ONICS‑T wrapper (onics-t.py);
+the D4xx bridge uses d4xx_to_mavlink.py.
 
 Environment variables (defaults in brackets):
   ONICS_LOG             Log file path [/home/pi/onics.log]
@@ -162,7 +164,8 @@ def setup_worker_logging() -> None:
 # ───────────────────── path/helpers ─────────────────────
 SCRIPT_DIR = Path(__file__).resolve().parent
 D4_SCRIPT = SCRIPT_DIR / "d4xx_to_mavlink.py"
-T265_SCRIPT = SCRIPT_DIR / "t265_precland_apriltags.py"
+# Use the dedicated ONICS‑T wrapper for the T265 instead of the legacy bridge
+T265_SCRIPT = SCRIPT_DIR / "onics-t.py"
 
 def require_cmd(cmd: str) -> None:
     """Ensure a command exists in PATH."""
@@ -294,7 +297,7 @@ def run_d4xx() -> None:
     device_loop("D4", D4_SCRIPT, CONN_OUT_P02)
 
 def run_t265() -> None:
-    """Launch and supervise the T265 helper with gating flags."""
+    """Launch and supervise the ONICS‑T helper with gating flags."""
     flags: List[str] = []
     if T265_GATE:
         flags.append("--gate")
@@ -440,7 +443,7 @@ def main() -> None:
     if not args.disable_arming:
         specs.append(ProcSpec("arming", monitor_arming))
     if not args.disable_t265:
-        specs.append(ProcSpec("t265", run_t265))
+        specs.append(ProcSpec("onics-t", run_t265))
     if not args.disable_d4xx:
         specs.append(ProcSpec("d4xx", run_d4xx))
 
