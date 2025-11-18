@@ -1,0 +1,11 @@
+[Unit]
+Description=LTE Uplink
+After=network.target
+
+[Service]
+ExecStart=/home/pi/Aeronomicon/uplink.sh
+Restart=always
+User=root
+
+[Install]
+WantedBy=default.target
