@@ -140,7 +140,13 @@ initialize_rosdep() {
 configure_environment() {
   local install_prefix
   if [[ "${PLATFORM}" == "ubuntu" ]]; then
-    install_prefix="/opt/ros/${ROS_DISTRO}"
+    local workspace_prefix="${ROS_WS}/install"
+    local distro_prefix="/opt/ros/${ROS_DISTRO}"
+    if [[ -f "${workspace_prefix}/setup.bash" ]]; then
+      install_prefix="${workspace_prefix}"
+    else
+      install_prefix="${distro_prefix}"
+    fi
   else
     install_prefix="${ROS_WS}/install"
   fi
@@ -148,7 +154,7 @@ configure_environment() {
   local ros_profile="/etc/profile.d/ros-${ROS_DISTRO}.sh"
   local source_line="source ${install_prefix}/setup.bash"
 
-  log "Ensuring shell automatically sources ROS environment."
+  log "Ensuring shell automatically sources ROS environment from ${install_prefix}."
   if [[ ! -f "${ros_profile}" ]]; then
     echo "${source_line}" > "${ros_profile}"
   fi
