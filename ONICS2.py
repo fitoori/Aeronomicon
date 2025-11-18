@@ -5,7 +5,7 @@
 ##   env-tunable · auto-restart · T265 gating · WPNAV sync      ##
 ##################################################################
 """
-Bridges ArduPilot ↔ sensors/cameras ↔ SiK radio, publishes arming status,
+Bridges ArduPilot ↔ sensors/cameras ↔ SiK radio, maintains an arming lock,
 and keeps cruise speed in sync with an external air-density calculator.
 
 Run `./ONICS.py --help` for a complete CLI/ENV overview.
@@ -13,6 +13,7 @@ Run `./ONICS.py --help` for a complete CLI/ENV overview.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import logging
 import logging.handlers
@@ -29,7 +30,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 from pymavlink import mavutil
 
@@ -71,6 +72,66 @@ def ensure_dir(path: Path) -> None:
     except PermissionError as exc:
         sys.exit(f"Cannot create directory {path}: {exc}")
 
+
+def ensure_lock_dir() -> None:
+    """Create and validate the lock directory."""
+
+    if not LOCK_DIR.is_absolute():
+        sys.exit(f"Lock directory must be absolute: {LOCK_DIR}")
+
+    try:
+        LOCK_DIR.mkdir(mode=0o755, parents=True, exist_ok=True)
+    except OSError as exc:
+        sys.exit(f"Cannot create lock directory {LOCK_DIR}: {exc}")
+
+    if not LOCK_DIR.is_dir():
+        sys.exit(f"Lock directory path is not a directory: {LOCK_DIR}")
+
+    try:
+        os.chmod(LOCK_DIR, 0o755)
+    except OSError as exc:
+        logging.warning("Unable to set permissions on %s: %s", LOCK_DIR, exc)
+
+
+def _validate_lock_path(path: Path) -> None:
+    if not path.is_absolute():
+        raise ValueError(f"Lock path must be absolute: {path}")
+    if path.parent != LOCK_DIR:
+        raise ValueError(f"Lock path must reside within {LOCK_DIR}: {path}")
+    if path.exists() and path.is_dir():
+        raise ValueError(f"Lock path points to a directory: {path}")
+
+
+def _open_lock_file(path: Path) -> int:
+    _validate_lock_path(path)
+    try:
+        return os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as exc:
+        raise OSError(f"Unable to open lock file {path}: {exc}") from exc
+
+
+def _acquire_lock(fd: int, path: Path) -> None:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise RuntimeError(f"Lock already held: {path}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"Unable to acquire lock {path}: {exc}") from exc
+
+
+def _release_lock(fd: int, path: Path) -> None:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError as exc:
+        logging.error("Failed to release lock %s: %s", path, exc)
+
+
+def _close_fd(fd: int, path: Path) -> None:
+    try:
+        os.close(fd)
+    except OSError as exc:
+        logging.error("Failed to close lock file %s: %s", path, exc)
+
 def _validate_udp_hostport(hp: str) -> str:
     try:
         host, port_s = hp.rsplit(":", 1)
@@ -98,7 +159,9 @@ def _jittered(v: float) -> float:
 LOG_FILE_PATH = Path(env_path("ONICS_LOG", "/home/pi/onics.log"))
 ensure_dir(LOG_FILE_PATH.parent)
 
-STATUS_FILE = Path(env_path("ONICS_ARM_JSON", "/home/pi/arming_status.json"))
+LOCK_DIR = Path("/run/watne")
+ONICS_LOCK_PATH = LOCK_DIR / "onics.lock"
+ARMED_LOCK_PATH = LOCK_DIR / "armed.lock"
 
 CONN_IN_PORT = _validate_udp_hostport(os.getenv("ONICS_MAV_PORT", "127.0.0.1:14550"))
 CONN_IN_BAUD = validate_baud(int(os.getenv("ONICS_MAV_BAUD", "921600")))
@@ -227,6 +290,23 @@ def enumerate_devices() -> None:
             print(" ", h)
     else:
         print("No relevant RealSense devices found.")
+
+# ───────────────────────── lock helpers ─────────────────────────
+def acquire_onics_lock() -> int:
+    ensure_lock_dir()
+    try:
+        fd = _open_lock_file(ONICS_LOCK_PATH)
+        _acquire_lock(fd, ONICS_LOCK_PATH)
+        return fd
+    except Exception as exc:
+        sys.exit(f"Unable to secure ONICS lock: {exc}")
+
+
+def release_onics_lock(fd: Optional[int]) -> None:
+    if fd is None:
+        return
+    _release_lock(fd, ONICS_LOCK_PATH)
+    _close_fd(fd, ONICS_LOCK_PATH)
 
 # ───────────────────── subprocess utilities ─────────────────────
 def _popen(cmd: List[str]) -> subprocess.Popen:
@@ -379,21 +459,29 @@ def cruise_speed_sync() -> None:
 # ───────────────────────── arming-status monitor ─────────────────────────
 _last_arm_state: Optional[bool] = None
 
-def _write_arm_json(armed: bool) -> None:
-    tmp = STATUS_FILE.with_suffix(".tmp")
-    payload: Dict[str, object] = {
-        "armed": armed,
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-    with open(tmp, "w", encoding="utf-8") as fp:
-        json.dump(payload, fp)
-        fp.flush()
-        os.fsync(fp.fileno())
-    tmp.replace(STATUS_FILE)
+
+def _close_armed_fd(fd: Optional[int]) -> None:
+    if fd is None:
+        return
+    _release_lock(fd, ARMED_LOCK_PATH)
+    _close_fd(fd, ARMED_LOCK_PATH)
+
 
 def monitor_arming() -> None:
     setup_worker_logging()
+    ensure_lock_dir()
     global _last_arm_state
+    armed_fd: Optional[int] = None
+
+    def _shutdown(signo: int, _frm) -> None:
+        logging.info("Arming monitor shutdown signal %d", signo)
+        _close_armed_fd(armed_fd)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGHUP, _shutdown)
+
     while True:
         try:
             mav = mavutil.mavlink_connection(f"udp:{CONN_IN_PORT}", input=False)
@@ -404,15 +492,26 @@ def monitor_arming() -> None:
                     break
                 armed = bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
                 if armed != _last_arm_state:
-                    _last_arm_state = armed
                     try:
-                        _write_arm_json(armed)
+                        if armed:
+                            fd = _open_lock_file(ARMED_LOCK_PATH)
+                            _acquire_lock(fd, ARMED_LOCK_PATH)
+                            armed_fd = fd
+                        else:
+                            _close_armed_fd(armed_fd)
+                            armed_fd = None
+                        _last_arm_state = armed
                         logging.info("Armed state → %s", armed)
-                    except OSError as exc:
-                        logging.error("Arming JSON write failed: %s", exc)
+                    except Exception as exc:
+                        logging.error("Arming lock update failed: %s", exc)
+                        time.sleep(SLEEP_FAST)
         except Exception as exc:
             logging.error("Arming monitor error: %s", exc)
             time.sleep(SLEEP_SLOW)
+        finally:
+            if armed_fd is not None and _last_arm_state is False:
+                _close_armed_fd(armed_fd)
+                armed_fd = None
 
 # ───────────────────────── process supervision ─────────────────────────
 @dataclass
@@ -462,7 +561,6 @@ _HELP_EPILOG = f"""
 ENVIRONMENT VARIABLES (defaults in brackets)
 ————————————————————————————————————————————————
   ONICS_LOG             Log file path [{str(LOG_FILE_PATH)}]
-  ONICS_ARM_JSON        Arming-status JSON [{str(STATUS_FILE)}]
   ONICS_MAV_PORT        MAVLink input endpoint [{CONN_IN_PORT}]
   ONICS_MAV_BAUD        MAVLink baudrate [{CONN_IN_BAUD}]
   ONICS_T265_PORT       UDP out port for T265 [{CONN_OUT_P01}]
@@ -498,13 +596,15 @@ EXAMPLES
 def main() -> None:
     mp.set_start_method("fork", force=True)
     setup_master_logging()
+    ensure_lock_dir()
+    onics_lock_fd = acquire_onics_lock()
     preflight()
 
     ap = argparse.ArgumentParser(
         prog="ONICS",
         description=(
             "ONICS Mk II – Optical Navigation & Interference Control System\n"
-            "Bridges ArduPilot ↔ sensors ↔ SiK radio, publishes arming status, "
+            "Bridges ArduPilot ↔ sensors ↔ SiK radio, maintains an arming lock, "
             "and auto-tunes cruise speed."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -555,16 +655,19 @@ def main() -> None:
                 p.join(timeout=5)
         if _log_listener:
             _log_listener.stop()
+        release_onics_lock(onics_lock_fd)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGHUP, _shutdown)
 
     try:
         supervise(specs)
     finally:
         if _log_listener:
             _log_listener.stop()
+        release_onics_lock(onics_lock_fd)
 
 if __name__ == "__main__":
     main()
