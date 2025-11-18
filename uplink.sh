@@ -184,7 +184,19 @@ reconnect_wwan() {
     dhcp_lease && log "DHCP ok" || log "DHCP fail"
 }
 safe_kill_tools() { sudo pkill -x -f '^qmicli .*(--wds-start-network|--wda-.*-data-.*)$' || true; sudo pkill -x udhcpc || true; sudo pkill -o -x ping -f " -I $WWAN_INTERFACE " || true; }
-handle_retries() { retries=$1; (( retries >= MAX_RETRIES )) && { log "Max retries – forcing reboot."; sudo reboot; }; backoff=$(( RETRY_INTERVAL << retries )); (( backoff > MAX_BACKOFF )) && backoff=$MAX_BACKOFF; log "Retry $(( retries + 1 ))/$MAX_RETRIES – sleep ${backoff}s."; reconnect_wwan; sleep "$backoff"; }
+handle_retries() {
+    retries=$1
+    (( retries >= MAX_RETRIES )) && { log "Max retries – forcing reboot."; sudo reboot; }
+
+    safe_kill_tools
+
+    backoff=$(( RETRY_INTERVAL << retries ))
+    (( backoff > MAX_BACKOFF )) && backoff=$MAX_BACKOFF
+
+    log "Retry $(( retries + 1 ))/$MAX_RETRIES – sleep ${backoff}s."
+    reconnect_wwan
+    sleep "$backoff"
+}
 
 ################################## startup ###################################
 log "========== LTE-uplink script started =========="
