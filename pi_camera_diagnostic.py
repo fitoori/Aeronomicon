@@ -331,6 +331,11 @@ def print_human(report: Dict[str, object]) -> None:
         camera_devices = v4l2.get("devices") or []
         if camera_devices:
             for device in camera_devices:
+        list_result = v4l2.get("list_devices", {})
+        if list_result:
+            print(list_result.get("stdout", "(no v4l2 output)"))
+        if v4l2.get("devices"):
+            for device in v4l2["devices"]:
                 print(f"Device: {device.get('name')}")
                 for node in device.get("nodes", []):
                     print(f"  Node: {node}")
