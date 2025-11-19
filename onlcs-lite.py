@@ -85,21 +85,31 @@ def ensure_dir(path: Path) -> None:
 def ensure_lock_dir() -> None:
     """Create and validate the lock directory."""
 
-    if not LOCK_DIR.is_absolute():
-        sys.exit(f"Lock directory must be absolute: {LOCK_DIR}")
+    for candidate in (LOCK_DIR, FALLBACK_LOCK_DIR):
+        if not candidate.is_absolute():
+            sys.exit(f"Lock directory must be absolute: {candidate}")
 
-    try:
-        LOCK_DIR.mkdir(mode=0o755, parents=True, exist_ok=True)
-    except OSError as exc:
-        sys.exit(f"Cannot create lock directory {LOCK_DIR}: {exc}")
+        try:
+            candidate.mkdir(mode=0o755, parents=True, exist_ok=True)
+        except PermissionError as exc:
+            logging.warning("Cannot create lock directory %s: %s", candidate, exc)
+            continue
+        except OSError as exc:
+            sys.exit(f"Cannot create lock directory {candidate}: {exc}")
 
-    if not LOCK_DIR.is_dir():
-        sys.exit(f"Lock directory path is not a directory: {LOCK_DIR}")
+        if not candidate.is_dir():
+            logging.warning("Lock directory path is not a directory: %s", candidate)
+            continue
 
-    try:
-        os.chmod(LOCK_DIR, 0o755)
-    except OSError as exc:
-        logging.warning("Unable to set permissions on %s: %s", LOCK_DIR, exc)
+        try:
+            os.chmod(candidate, 0o755)
+        except OSError as exc:
+            logging.warning("Unable to set permissions on %s: %s", candidate, exc)
+
+        _set_lock_paths(candidate)
+        return
+
+    sys.exit(f"Unable to establish lock directory; tried {LOCK_DIR} and {FALLBACK_LOCK_DIR}")
 
 
 def _validate_lock_path(path: Path) -> None:
@@ -165,9 +175,20 @@ def _jittered(v: float) -> float:
 LOG_FILE_PATH = Path(env_path("ONICS_LOG", "/home/pi/onics.log"))
 ensure_dir(LOG_FILE_PATH.parent)
 
-LOCK_DIR = Path("/run/watne")
-ONICS_LOCK_PATH = LOCK_DIR / "onics.lock"
-ARMED_LOCK_PATH = LOCK_DIR / "armed.lock"
+DEFAULT_LOCK_DIR = Path("/run/watne")
+FALLBACK_LOCK_DIR = Path("/tmp/watne")
+LOCK_DIR = Path(env_path("ONICS_LOCK_DIR", str(DEFAULT_LOCK_DIR)))
+
+if not LOCK_DIR.is_absolute():
+    sys.exit(f"Lock directory must be absolute: {LOCK_DIR}")
+
+def _set_lock_paths(lock_dir: Path) -> None:
+    global LOCK_DIR, ONICS_LOCK_PATH, ARMED_LOCK_PATH
+    LOCK_DIR = lock_dir
+    ONICS_LOCK_PATH = LOCK_DIR / "onics.lock"
+    ARMED_LOCK_PATH = LOCK_DIR / "armed.lock"
+
+_set_lock_paths(LOCK_DIR)
 
 # MAVLink input used only for arming lock tracking
 CONN_IN_PORT = _validate_udp_hostport(os.getenv("ONICS_MAV_PORT", "127.0.0.1:14550"))
