@@ -23,7 +23,7 @@ import ctypes
 import os
 import sys
 from ctypes.util import find_library
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -296,8 +296,8 @@ class Detector:
         self,
         img: np.ndarray,
         estimate_tag_pose: bool = False,
-        camera_params: Sequence[float] | None = None,
-        tag_size: float | None = None,
+        camera_params: Optional[Sequence[float]] = None,
+        tag_size: Optional[float] = None,
     ) -> List[Detection]:
         """Detect tags in a grayscale uint8 image."""
         if img.ndim != 2 or img.dtype != np.uint8:
@@ -336,8 +336,8 @@ class Detector:
         self,
         dets_ptr: ctypes.POINTER(_ZArray),
         estimate_tag_pose: bool,
-        camera_params: Sequence[float] | None,
-        tag_size: float | None,
+        camera_params: Optional[Sequence[float]],
+        tag_size: Optional[float],
     ) -> List[Detection]:
         num = dets_ptr.contents.size
         results: List[Detection] = []
