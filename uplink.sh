@@ -44,8 +44,15 @@ readonly DAILY_REBOOT_TIME="01:00"  # scheduled time to run reboot (local HH:MM;
 readonly PRE_REBOOT_CHECK_SEC=45    # run arming check this many seconds prior to scheduled reboot
 
 ## arming-lock parameters
-readonly ARMING_LOCK_DIR="/run/watne"
-readonly ARMING_LOCK_FILE="$ARMING_LOCK_DIR/armed.lock"
+ARMING_LOCK_DIR_DEFAULT="/run/watne"
+ARMING_LOCK_DIR="${ARMING_LOCK_DIR:-$ARMING_LOCK_DIR_DEFAULT}"
+ARMING_LOCK_FILE=""
+
+set_lock_paths() {
+    ARMING_LOCK_FILE="$ARMING_LOCK_DIR/armed.lock"
+}
+
+set_lock_paths
 ###############################################################################
 
 
@@ -66,10 +73,33 @@ ensure_lock_dir() {
         log "Lock path $ARMING_LOCK_DIR is not a directory."
         return 1
     fi
-    if ! install -d -m 755 "$ARMING_LOCK_DIR"; then
-        log "Failed to create lock directory $ARMING_LOCK_DIR."
+    if install -d -m 755 "$ARMING_LOCK_DIR"; then
+        return 0
+    fi
+
+    log "Failed to create lock directory $ARMING_LOCK_DIR; trying fallback."
+
+    local fallback="/tmp/watne"
+    if [[ $ARMING_LOCK_DIR == "$fallback" ]]; then
+        log "Fallback lock directory already in use; giving up."
         return 1
     fi
+
+    ARMING_LOCK_DIR="$fallback"
+    set_lock_paths
+
+    if [[ -e $ARMING_LOCK_DIR && ! -d $ARMING_LOCK_DIR ]]; then
+        log "Fallback lock path $ARMING_LOCK_DIR is not a directory."
+        return 1
+    fi
+
+    if install -d -m 755 "$ARMING_LOCK_DIR"; then
+        log "Using fallback lock directory $ARMING_LOCK_DIR."
+        return 0
+    fi
+
+    log "Failed to create fallback lock directory $ARMING_LOCK_DIR."
+    return 1
 }
 
 ############################# single-instance lock ############################
