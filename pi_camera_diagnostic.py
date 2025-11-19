@@ -191,6 +191,27 @@ def classify_camera(name: str) -> Optional[str]:
     return None
 
 
+def is_non_camera_device(name: str) -> bool:
+    """Filter out infrastructure V4L2 nodes such as codecs and ISP blocks."""
+
+    lowered = name.lower()
+    infrastructure_keywords = {
+        "codec",
+        "decode",
+        "encode",
+        "encoder",
+        "decoder",
+        "isp",
+        "render",
+        "mem2mem",
+        "mmal service",
+        "bcm2835",
+        "vc4",
+        "hdmi",
+    }
+    return any(keyword in lowered for keyword in infrastructure_keywords)
+
+
 def environment_warnings(env: Dict[str, str], cameras: List[Dict[str, object]], stack: Dict[str, object]) -> List[str]:
     warnings: List[str] = []
     os_id = env.get("os_id", "").lower()
@@ -235,6 +256,12 @@ def build_report(args: argparse.Namespace) -> Dict[str, object]:
     cameras = libcamera_info.get("cameras", []) if libcamera_info else []
     if not cameras:
         v4l2_info = detect_v4l2_devices(stack)
+        if v4l2_info.get("devices"):
+            v4l2_info["devices"] = [
+                device
+                for device in v4l2_info["devices"]
+                if not is_non_camera_device(device.get("name", ""))
+            ]
     else:
         v4l2_info = {}
 
@@ -301,6 +328,9 @@ def print_human(report: Dict[str, object]) -> None:
     else:
         print("No cameras detected via libcamera. Falling back to v4l2 device enumeration.")
         v4l2 = report.get("v4l2", {})
+        camera_devices = v4l2.get("devices") or []
+        if camera_devices:
+            for device in camera_devices:
         list_result = v4l2.get("list_devices", {})
         if list_result:
             print(list_result.get("stdout", "(no v4l2 output)"))
@@ -314,6 +344,12 @@ def print_human(report: Dict[str, object]) -> None:
                     if stdout:
                         for line in stdout.splitlines():
                             print(f"    {line}")
+        else:
+            list_result = v4l2.get("list_devices", {})
+            if list_result and list_result.get("stdout"):
+                print("No camera-class V4L2 devices detected (filtered out codecs/ISP blocks).")
+            else:
+                print("No V4L2 devices found or v4l2-ctl unavailable.")
 
     if report.get("warnings"):
         print("\n=== Warnings ===")
