@@ -3,10 +3,11 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: install-services.sh [--update]
+Usage: install-services.sh [--install|--update]
 
 Installs or updates Aeronomicon systemd services.
 
+  --install  Install service unit files and enable them (default if no flag).
   --update   Reinstall service unit files and restart enabled services.
   -h, --help Show this help text.
 USAGE
@@ -15,6 +16,10 @@ USAGE
 mode="install"
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --install)
+      mode="install"
+      shift
+      ;;
     --update)
       mode="update"
       shift
@@ -38,10 +43,25 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+arming_lock_scripts=(uplink.sh ONICS2.py onlcs-lite.py)
+
+ensure_executable_scripts() {
+  for script in "${arming_lock_scripts[@]}"; do
+    local path="${script_dir}/${script}"
+    if [[ ! -f "${path}" ]]; then
+      echo "Expected script not found: ${path}" >&2
+      exit 1
+    fi
+    chmod +x "${path}"
+  done
+}
+
 services=(
   mavproxy.service
   uplink.service
 )
+
+ensure_executable_scripts
 
 for service in "${services[@]}"; do
   service_path="${script_dir}/${service}"
