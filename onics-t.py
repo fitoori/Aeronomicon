@@ -182,7 +182,6 @@ else:
 # AprilTag detector
 # ------------------------------
 at_detector = apriltags3.Detector(
-    searchpath=['apriltags'],
     families=APRILTAG_FAMILY,       # <<--- tagStandard41h12
     nthreads=1,
     quad_decimate=1.0,
