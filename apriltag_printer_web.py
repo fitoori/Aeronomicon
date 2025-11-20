@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import re
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
@@ -158,6 +159,47 @@ def cached_options() -> Dict[str, List[str]]:
     return options
 
 
+def _cached_tag_file(family: str, tag_id: int) -> Path | None:
+    family_dir = CACHE_DIR / family
+    if not family_dir.exists():
+        return None
+
+    suffixes = [f"_{tag_id:05d}.png", f"_{tag_id}.png"]
+    for suffix in suffixes:
+        match = next(family_dir.glob(f"*{suffix}"), None)
+        if match:
+            return match
+    return None
+
+
+def ensure_tag_cached(family: str, tag_id: int) -> str:
+    """Guarantee the requested tag PNG exists locally and return its filename."""
+
+    cached = _cached_tag_file(family, tag_id)
+    if cached:
+        return cached.name
+
+    family_dir = CACHE_DIR / family
+    family_dir.mkdir(parents=True, exist_ok=True)
+
+    suffixes = [f"_{tag_id:05d}.png", f"_{tag_id}.png"]
+    target_entry = None
+    for entry in fetch_family_entries(family):
+        name = entry.get("name", "")
+        if any(name.endswith(suffix) for suffix in suffixes):
+            target_entry = entry
+            break
+
+    if not target_entry:
+        raise FileNotFoundError(f"Tag {tag_id} not found in {family}")
+
+    img_resp = requests.get(target_entry["download_url"], timeout=30)
+    img_resp.raise_for_status()
+    target_path = family_dir / target_entry["name"]
+    target_path.write_bytes(img_resp.content)
+    return target_path.name
+
+
 HOME_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -184,6 +226,7 @@ HOME_TEMPLATE = """
     </form>
     <form action="{{ url_for('generate') }}" method="post">
       <label>Tag family</label>
+      <select name="family" id="family" required onchange="this.form.submit()">
       <select
         name="family"
         id="family"
@@ -281,5 +324,37 @@ def generate() -> Response:
     )
 
 
+def run_default_cli() -> None:
+    defaults = read_onics_defaults()
+    filename = ensure_tag_cached(defaults["family"], defaults["tag_id"])
+    selection = TagSelection(
+        family=defaults["family"],
+        filename=filename,
+        edge_m=defaults["edge_m"],
+    )
+    pdf_buffer = create_tag_pdf(selection)
+
+    output_path = Path.home() / selection.pdf_name()
+    output_path.write_bytes(pdf_buffer.getvalue())
+    print(f"Saved PDF to {output_path}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="AprilTag printer utility")
+    parser.add_argument(
+        "--default",
+        action="store_true",
+        help="Generate PDF for onics-t defaults and exit",
+    )
+    args = parser.parse_args()
+
+    if args.default:
+        run_default_cli()
+    else:
+        APP.run(host="0.0.0.0", port=8000, debug=True)
+
+
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     APP.run(host="0.0.0.0", port=8000, debug=True)
