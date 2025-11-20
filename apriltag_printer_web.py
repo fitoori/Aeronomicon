@@ -184,7 +184,12 @@ HOME_TEMPLATE = """
     </form>
     <form action="{{ url_for('generate') }}" method="post">
       <label>Tag family</label>
-      <select name="family" id="family" required onchange="this.form.submit()">
+      <select
+        name="family"
+        id="family"
+        required
+        onchange="window.location.href='{{ url_for('home') }}?family=' + encodeURIComponent(this.value)"
+      >
         {% for family in families %}
           <option value="{{ family }}" {% if family == selected_family %}selected{% endif %}>{{ family }}</option>
         {% endfor %}
