@@ -122,13 +122,16 @@ def coalesce(val, default):
 def _validate_positive_rate(name: str, value: float, default: float) -> float:
     """Return a positive frequency value, falling back to default on invalid input."""
     try:
-        value = float(coalesce(value, default))
-        if value <= 0:
-            raise ValueError
-        return value
-    except Exception:
-        print(f"WARN: Invalid {name} supplied; using default {default} Hz instead.")
+        coerced = float(coalesce(value, default))
+    except (TypeError, ValueError):
+        print(f"WARN: Invalid {name} {value!r}; using default {default} Hz instead.")
         return float(default)
+
+    if not m.isfinite(coerced) or coerced <= 0:
+        print(f"WARN: Invalid {name} {value!r}; using default {default} Hz instead.")
+        return float(default)
+
+    return coerced
 
 
 connection_string      = coalesce(args.connect, connection_string_default)
