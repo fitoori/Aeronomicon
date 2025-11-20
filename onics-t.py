@@ -200,6 +200,31 @@ at_detector = apriltags3.Detector(
     debug=0
 )
 
+
+def _detect_apriltags(center_undistorted, camera_params, image_source):
+    """Detect AprilTags with guarded source selection and error handling."""
+    if camera_params is None:
+        print("WARN: Missing camera parameters; skipping AprilTag detection.")
+        return []
+
+    source = image_source if image_source in center_undistorted else None
+    if source is None:
+        for fallback in ("right", "left"):
+            if fallback in center_undistorted:
+                print(f"WARN: AprilTag source '{image_source}' unavailable; using '{fallback}' instead.")
+                source = fallback
+                break
+
+    if source is None:
+        print("WARN: No valid image source available for AprilTag detection.")
+        return []
+
+    try:
+        return at_detector.detect(center_undistorted[source], True, camera_params, tag_landing_size)
+    except Exception as e:
+        print(f"WARN: AprilTag detect error on {source} image: {e}")
+        return []
+
 # ------------------------------
 # MAVLink helpers
 # ------------------------------
@@ -777,12 +802,7 @@ try:
             continue
 
         # AprilTag detection
-        tags = []
-        try:
-            tags = at_detector.detect(center_undistorted[tag_image_source],
-                                      True, camera_params, tag_landing_size)
-        except Exception as e:
-            print(f"WARN: AprilTag detect error: {e}")
+        tags = _detect_apriltags(center_undistorted, camera_params, tag_image_source)
 
         is_landing_tag_detected = False
         H_camera_tag = None
