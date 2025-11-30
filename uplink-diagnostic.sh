@@ -97,9 +97,8 @@ check_internet() {
     loss=$(ping -I "$iface" -c 3 -W 3 "$PING_TARGET" | \
         awk -F', ' '/packet loss/{
             for (i = 1; i <= NF; i++) {
-                if ($i ~ /packet loss/) {
-                    sub(/[^0-9]*([0-9]+).*/, "\\1", $i)
-                    print $i + 0
+                if ($i ~ /packet loss/ && match($i, /([0-9]+)/, m)) {
+                    print m[1] + 0
                     exit
                 }
             }
