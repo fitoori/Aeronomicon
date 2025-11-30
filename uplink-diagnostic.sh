@@ -94,7 +94,15 @@ check_internet() {
     local iface=$1
     log "Pinging $PING_TARGET over $iface…"
     local loss
-    loss=$(ping -I "$iface" -c 3 -W 3 "$PING_TARGET" | awk -F', ' '/packet loss/{print $(NF-2)+0}' || echo 100)
+    loss=$(ping -I "$iface" -c 3 -W 3 "$PING_TARGET" | \
+        awk -F', ' '/packet loss/{
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /packet loss/ && match($i, /([0-9]+)/, m)) {
+                    print m[1] + 0
+                    exit
+                }
+            }
+        }' || echo 100)
     if (( loss >= 100 )); then
         log "Ping failed with ${loss}% packet loss."
         return 1
