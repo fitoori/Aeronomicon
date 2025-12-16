@@ -30,9 +30,11 @@ try:
 
     # Get Barometer data
     barometer.refreshPressure()
-    barometer.refreshTemperature()
     time.sleep(0.01)
     barometer.readPressure()
+
+    barometer.refreshTemperature()
+    time.sleep(0.01)
     barometer.readTemperature()
     pressure = barometer.returnPressure()
     temperature = barometer.returnTemperature()
