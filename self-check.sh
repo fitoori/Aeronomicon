@@ -67,6 +67,11 @@ restart_ardupilot() {
         return 0
     fi
 
+    if (( ! ARDUPILOT_WAS_ACTIVE )); then
+        log "Skipping ArduPilot restart – service was not active before diagnostics."
+        return 0
+    fi
+
     log "Requesting restart of ${ARDUPILOT_SERVICE}.service to confirm it resumes after diagnostics…"
     if systemctl restart "$ARDUPILOT_SERVICE"; then
         sleep 2
