@@ -106,6 +106,17 @@ tag_image_source = "right"   # T265 supports "left" or "right"
 # Shutdown event (set on SIGTERM/SIGINT)
 shutdown_event = threading.Event()
 
+# Cached status exposed via optional web server
+status_snapshot = {
+    "timestamp_us": None,
+    "pose_confidence": None,
+    "landing_tag_detected": False,
+    "landing_tag_pose_m": None,
+    "vision_rate_hz": vision_msg_hz,
+    "performance": None,
+}
+status_lock = threading.Lock()
+
 # ------------------------------
 # CLI args
 # ------------------------------
@@ -118,7 +129,8 @@ parser.add_argument('--confidence_msg_hz', type=float, help="Confidence report f
 parser.add_argument('--scale_calib_enable', type=bool, help="Scale calibration (NOT in flight).")
 parser.add_argument('--camera_orientation', type=int,
                     help="Camera orientation: 0=forward/right-USB, 1=down/right-USB")
-parser.add_argument('--visualization', type=int, help="Enable visualization window (1 to enable).")
+parser.add_argument('--enable-web', '-w', action='store_true', help="Expose status endpoints via Flask.")
+parser.add_argument('--web-port', type=int, default=5000, help="Port for the optional status web server.")
 parser.add_argument('--debug_enable', type=int, help="Enable debug print (1 to enable).")
 args = parser.parse_args()
 
@@ -133,7 +145,8 @@ landing_target_msg_hz  = coalesce(args.landing_target_msg_hz, landing_target_msg
 confidence_msg_hz      = coalesce(args.confidence_msg_hz, confidence_msg_hz_default)
 scale_calib_enable     = bool(args.scale_calib_enable) if args.scale_calib_enable is not None else False
 camera_orientation     = coalesce(args.camera_orientation, camera_orientation_default)
-visualization          = 1 if (args.visualization and int(args.visualization) == 1) else 0
+web_enabled            = bool(args.enable_web)
+web_port               = args.web_port
 debug_enable           = 1 if (args.debug_enable and int(args.debug_enable) == 1) else 0
 
 print(f"INFO: Using connection_string: {connection_string}")
@@ -152,12 +165,7 @@ if scale_calib_enable:
 else:
     print(f"INFO: Scale factor: {scale_factor}")
 
-if visualization == 1:
-    WINDOW_TITLE = 'AprilTag detection from T265 images'
-    cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_AUTOSIZE)
-    print("INFO: Visualization enabled (press 'q' to exit pop-up).")
-else:
-    print("INFO: Visualization disabled.")
+print("INFO: Web endpoints:", f"Enabled on port {web_port}" if web_enabled else "Disabled")
 
 if debug_enable == 1:
     np.set_printoptions(precision=4, suppress=True)
@@ -522,6 +530,27 @@ def get_performance_snapshot():
     cpu = psutil.cpu_percent(interval=None) if _HAVE_PSUTIL else None
     return {"loop_dt_ema_s": dt, "loop_fps": loop_fps, "cpu_percent": cpu}
 
+def update_status_snapshot(perf=None):
+    """Refresh the cached status for optional web exposure."""
+    snapshot = {
+        "timestamp_us": current_time,
+        "pose_confidence": pose_data_confidence_level[data.tracker_confidence] if data else None,
+        "landing_tag_detected": bool(is_landing_tag_detected),
+        "landing_tag_pose_m": None,
+        "vision_rate_hz": vision_msg_hz,
+        "performance": perf if perf is not None else get_performance_snapshot(),
+    }
+
+    if H_camera_tag is not None:
+        snapshot["landing_tag_pose_m"] = {
+            "x": float(H_camera_tag[0][3]),
+            "y": float(H_camera_tag[1][3]),
+            "z": float(H_camera_tag[2][3]),
+        }
+
+    with status_lock:
+        status_snapshot.update(snapshot)
+
 def set_vision_rate(new_hz: float):
     """
     Force the VISION_POSITION_ESTIMATE message rate.
@@ -542,6 +571,8 @@ def set_vision_rate(new_hz: float):
             sched.reschedule_job('vision_job', trigger='interval', seconds=interval_s)
         print(f"INFO: Adjusted vision message rate to {vision_msg_hz:.2f} Hz "
               f"(interval {interval_s*1000:.1f} ms).")
+        with status_lock:
+            status_snapshot["vision_rate_hz"] = vision_msg_hz
         return True
     except Exception as e:
         print(f"WARN: Failed to set vision message rate: {e}")
@@ -645,6 +676,34 @@ def set_dynamic_pose_rate(enable: bool,
         _dynamic_thread.start()
         print("INFO: Dynamic pose rate worker started.")
 
+
+def start_status_web_server(port: int):
+    """Start a lightweight Flask server exposing health/status endpoints."""
+    try:
+        from flask import Flask, jsonify
+    except Exception as e:
+        print(f"WARN: Flask unavailable ({e}); web endpoints disabled.")
+        return
+
+    app = Flask(__name__)
+
+    @app.route("/health")
+    def health():
+        return {"status": "ok", "shutdown": shutdown_event.is_set()}
+
+    @app.route("/status")
+    def status():
+        with status_lock:
+            snap = dict(status_snapshot)
+        return jsonify(snap)
+
+    def _run():
+        app.run(host="0.0.0.0", port=int(port), threaded=True, use_reloader=False)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    print(f"INFO: Web server listening on 0.0.0.0:{port}")
+
 # ------------------------------
 # Background jobs (with IDs for reschedule)
 # ------------------------------
@@ -661,6 +720,9 @@ if scale_calib_enable:
     scale_update_thread.start()
 
 sched.start()
+
+if web_enabled:
+    start_status_web_server(web_port)
 
 if compass_enabled == 1:
     time.sleep(1.0)
@@ -789,37 +851,11 @@ try:
                           f"x:{H_camera_tag[0][3]:.3f}, y:{H_camera_tag[1][3]:.3f}, z:{H_camera_tag[2][3]:.3f}")
                     break  # Only care about the landing tag
 
-        # Visualization
-        if visualization == 1:
-            try:
-                tags_img = center_undistorted[tag_image_source].copy()
-                for tag in (tags or []):
-                    # draw bounding box
-                    for idx in range(len(tag.corners)):
-                        cv2.line(tags_img,
-                                 tuple(tag.corners[idx-1, :].astype(int)),
-                                 tuple(tag.corners[idx, :].astype(int)),
-                                 thickness=2, color=(255, 0, 0))
-                    text = str(tag.tag_id)
-                    textsize = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
-                    cx = int((tag.corners[0, 0] + tag.corners[2, 0] - textsize[0]) / 2)
-                    cy = int((tag.corners[0, 1] + tag.corners[2, 1] + textsize[1]) / 2)
-                    cv2.putText(tags_img, text, (cx, cy),
-                                fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
-                                thickness=2, color=(255, 0, 0))
-
-                cv2.imshow(WINDOW_TITLE, tags_img)
-                key = cv2.waitKey(1)
-                if key == ord('q') or cv2.getWindowProperty(WINDOW_TITLE, cv2.WND_PROP_VISIBLE) < 1:
-                    print("INFO: Visualization window closed by user.")
-                    shutdown_event.set()
-                    break
-            except Exception as e:
-                print(f"WARN: Visualization error: {e}")
-
         # ---- Update performance metrics at end of loop ----
         iter_end = time.time()
         _perf_update_loop_dt(iter_end - iter_start)
+
+        update_status_snapshot(perf=get_performance_snapshot())
 
 except Exception as e:
     print("ERROR:", e)
@@ -836,11 +872,6 @@ finally:
     try:
         if vehicle is not None:
             vehicle.close()
-    except Exception:
-        pass
-    try:
-        if visualization == 1:
-            cv2.destroyAllWindows()
     except Exception:
         pass
     print("INFO: RealSense pipeline and vehicle closed. Exiting.")
