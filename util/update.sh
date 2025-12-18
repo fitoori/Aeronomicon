@@ -12,7 +12,7 @@ require_command() {
   fi
 }
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUDO=()
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   SUDO=(sudo)
@@ -25,7 +25,7 @@ update_repo() {
 }
 
 run_installer_update() {
-  local installer="${REPO_DIR}/install/install-services.sh"
+  local installer="${REPO_DIR}/legacy/install/install-services.sh"
   if [[ ! -x "${installer}" ]]; then
     echo "Installer not found or not executable: ${installer}" >&2
     exit 1
