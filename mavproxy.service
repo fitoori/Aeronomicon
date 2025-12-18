@@ -1,0 +1,14 @@
+[Unit]
+Description= MAVproxy Service for WATNE
+After=network.target
+
+[Service]
+ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=/dev/ttyUSB0 --no-state --daemon
+WorkingDirectory=/home/pi/
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=pi
+
+[Install]
+WantedBy=multi-user.target
