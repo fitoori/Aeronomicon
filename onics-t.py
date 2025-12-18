@@ -126,11 +126,26 @@ args = parser.parse_args()
 def coalesce(val, default):
     return default if val is None else val
 
+def _validate_positive_rate(name: str, value: float, default: float) -> float:
+    """Return a positive frequency value, falling back to default on invalid input."""
+    try:
+        coerced = float(coalesce(value, default))
+    except (TypeError, ValueError):
+        print(f"WARN: Invalid {name} {value!r}; using default {default} Hz instead.")
+        return float(default)
+
+    if not m.isfinite(coerced) or coerced <= 0:
+        print(f"WARN: Invalid {name} {value!r}; using default {default} Hz instead.")
+        return float(default)
+
+    return coerced
+
+
 connection_string      = coalesce(args.connect, connection_string_default)
 connection_baudrate    = coalesce(args.baudrate, connection_baudrate_default)
-vision_msg_hz          = coalesce(args.vision_msg_hz, vision_msg_hz_default)
-landing_target_msg_hz  = coalesce(args.landing_target_msg_hz, landing_target_msg_hz_default)
-confidence_msg_hz      = coalesce(args.confidence_msg_hz, confidence_msg_hz_default)
+vision_msg_hz          = _validate_positive_rate("vision_msg_hz", args.vision_msg_hz, vision_msg_hz_default)
+landing_target_msg_hz  = _validate_positive_rate("landing_target_msg_hz", args.landing_target_msg_hz, landing_target_msg_hz_default)
+confidence_msg_hz      = _validate_positive_rate("confidence_msg_hz", args.confidence_msg_hz, confidence_msg_hz_default)
 scale_calib_enable     = bool(args.scale_calib_enable) if args.scale_calib_enable is not None else False
 camera_orientation     = coalesce(args.camera_orientation, camera_orientation_default)
 visualization          = 1 if (args.visualization and int(args.visualization) == 1) else 0
@@ -222,6 +237,31 @@ def create_apriltag_detector():
 
 
 at_detector = create_apriltag_detector()
+
+
+def _detect_apriltags(center_undistorted, camera_params, image_source):
+    """Detect AprilTags with guarded source selection and error handling."""
+    if camera_params is None:
+        print("WARN: Missing camera parameters; skipping AprilTag detection.")
+        return []
+
+    source = image_source if image_source in center_undistorted else None
+    if source is None:
+        for fallback in ("right", "left"):
+            if fallback in center_undistorted:
+                print(f"WARN: AprilTag source '{image_source}' unavailable; using '{fallback}' instead.")
+                source = fallback
+                break
+
+    if source is None:
+        print("WARN: No valid image source available for AprilTag detection.")
+        return []
+
+    try:
+        return at_detector.detect(center_undistorted[source], True, camera_params, tag_landing_size)
+    except Exception as e:
+        print(f"WARN: AprilTag detect error on {source} image: {e}")
+        return []
 
 # ------------------------------
 # MAVLink helpers
@@ -476,6 +516,7 @@ def restart_realsense_pipeline(backoff_s=2.0, max_backoff_s=30.0):
             print(f"WARN: RealSense restart failed: {e}. Retrying in {delay:.1f}s...")
             time.sleep(delay)
             delay = min(delay * 2.0, max_backoff_s)
+    print("INFO: Skipping RealSense restart because shutdown was requested.")
     return None, None
 
 # ------------------------------
@@ -706,7 +747,7 @@ try:
     while not shutdown_event.is_set():
         iter_start = time.time()
         try:
-            frames = pipe.wait_for_frames()
+            frames = pipe.wait_for_frames(timeout_ms=5000)
         except Exception as e:
             print(f"WARN: RealSense frames error: {e}")
             if shutdown_event.is_set():
@@ -799,6 +840,7 @@ try:
             continue
 
         # AprilTag detection
+        tags = _detect_apriltags(center_undistorted, camera_params, tag_image_source)
         tags = []
         if at_detector is None:
             print("WARN: AprilTag detector unavailable; skipping detection")
