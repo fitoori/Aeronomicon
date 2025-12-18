@@ -118,7 +118,6 @@ parser.add_argument('--confidence_msg_hz', type=float, help="Confidence report f
 parser.add_argument('--scale_calib_enable', type=bool, help="Scale calibration (NOT in flight).")
 parser.add_argument('--camera_orientation', type=int,
                     help="Camera orientation: 0=forward/right-USB, 1=down/right-USB")
-parser.add_argument('--visualization', type=int, help="Enable visualization window (1 to enable).")
 parser.add_argument('--debug_enable', type=int, help="Enable debug print (1 to enable).")
 args = parser.parse_args()
 
@@ -148,7 +147,6 @@ landing_target_msg_hz  = _validate_positive_rate("landing_target_msg_hz", args.l
 confidence_msg_hz      = _validate_positive_rate("confidence_msg_hz", args.confidence_msg_hz, confidence_msg_hz_default)
 scale_calib_enable     = bool(args.scale_calib_enable) if args.scale_calib_enable is not None else False
 camera_orientation     = coalesce(args.camera_orientation, camera_orientation_default)
-visualization          = 1 if (args.visualization and int(args.visualization) == 1) else 0
 debug_enable           = 1 if (args.debug_enable and int(args.debug_enable) == 1) else 0
 
 print(f"INFO: Using connection_string: {connection_string}")
@@ -166,13 +164,6 @@ if scale_calib_enable:
           "INFO: Type a new scale (float) at any time.\n")
 else:
     print(f"INFO: Scale factor: {scale_factor}")
-
-if visualization == 1:
-    WINDOW_TITLE = 'AprilTag detection from T265 images'
-    cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_AUTOSIZE)
-    print("INFO: Visualization enabled (press 'q' to exit pop-up).")
-else:
-    print("INFO: Visualization disabled.")
 
 if debug_enable == 1:
     np.set_printoptions(precision=4, suppress=True)
@@ -870,34 +861,6 @@ try:
                           f"x:{H_camera_tag[0][3]:.3f}, y:{H_camera_tag[1][3]:.3f}, z:{H_camera_tag[2][3]:.3f}")
                     break  # Only care about the landing tag
 
-        # Visualization
-        if visualization == 1:
-            try:
-                tags_img = center_undistorted[tag_image_source].copy()
-                for tag in (tags or []):
-                    # draw bounding box
-                    for idx in range(len(tag.corners)):
-                        cv2.line(tags_img,
-                                 tuple(tag.corners[idx-1, :].astype(int)),
-                                 tuple(tag.corners[idx, :].astype(int)),
-                                 thickness=2, color=(255, 0, 0))
-                    text = str(tag.tag_id)
-                    textsize = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
-                    cx = int((tag.corners[0, 0] + tag.corners[2, 0] - textsize[0]) / 2)
-                    cy = int((tag.corners[0, 1] + tag.corners[2, 1] + textsize[1]) / 2)
-                    cv2.putText(tags_img, text, (cx, cy),
-                                fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5,
-                                thickness=2, color=(255, 0, 0))
-
-                cv2.imshow(WINDOW_TITLE, tags_img)
-                key = cv2.waitKey(1)
-                if key == ord('q') or cv2.getWindowProperty(WINDOW_TITLE, cv2.WND_PROP_VISIBLE) < 1:
-                    print("INFO: Visualization window closed by user.")
-                    shutdown_event.set()
-                    break
-            except Exception as e:
-                print(f"WARN: Visualization error: {e}")
-
         # ---- Update performance metrics at end of loop ----
         iter_end = time.time()
         _perf_update_loop_dt(iter_end - iter_start)
@@ -917,11 +880,6 @@ finally:
     try:
         if vehicle is not None:
             vehicle.close()
-    except Exception:
-        pass
-    try:
-        if visualization == 1:
-            cv2.destroyAllWindows()
     except Exception:
         pass
     print("INFO: RealSense pipeline and vehicle closed. Exiting.")
