@@ -181,15 +181,47 @@ else:
 # ------------------------------
 # AprilTag detector
 # ------------------------------
-at_detector = apriltags3.Detector(
-    families=APRILTAG_FAMILY,       # <<--- tagStandard41h12
-    nthreads=1,
-    quad_decimate=1.0,
-    quad_sigma=0.0,
-    refine_edges=1,
-    decode_sharpening=0.25,
-    debug=0
-)
+def create_apriltag_detector():
+    """Validate AprilTag prerequisites and return a detector or None."""
+    if APRILTAG_FAMILY not in apriltags3.Detector._FAMILIES:
+        print(
+            f"WARN: Requested AprilTag family '{APRILTAG_FAMILY}' is unsupported; "
+            f"supported families: {sorted(apriltags3.Detector._FAMILIES)}"
+        )
+        return None
+
+    try:
+        libc = apriltags3.Detector._load_library()
+    except Exception as e:
+        print(f"WARN: AprilTag shared library unavailable: {e}")
+        return None
+
+    create_fn, destroy_fn = apriltags3.Detector._FAMILIES[APRILTAG_FAMILY]
+    required_symbols = {create_fn, destroy_fn, "apriltag_detector_create", "apriltag_detector_destroy"}
+    missing_symbols = sorted(fn for fn in required_symbols if not hasattr(libc, fn))
+    if missing_symbols:
+        print(
+            f"WARN: AprilTag library missing required symbol(s) {missing_symbols} for family "
+            f"'{APRILTAG_FAMILY}'"
+        )
+        return None
+
+    try:
+        return apriltags3.Detector(
+            families=APRILTAG_FAMILY,       # <<--- tagStandard41h12
+            nthreads=1,
+            quad_decimate=1.0,
+            quad_sigma=0.0,
+            refine_edges=1,
+            decode_sharpening=0.25,
+            debug=0
+        )
+    except Exception as e:
+        print(f"WARN: Failed to initialize AprilTag detector: {e}")
+        return None
+
+
+at_detector = create_apriltag_detector()
 
 # ------------------------------
 # MAVLink helpers
@@ -768,11 +800,18 @@ try:
 
         # AprilTag detection
         tags = []
-        try:
-            tags = at_detector.detect(center_undistorted[tag_image_source],
-                                      True, camera_params, tag_landing_size)
-        except Exception as e:
-            print(f"WARN: AprilTag detect error: {e}")
+        if at_detector is None:
+            print("WARN: AprilTag detector unavailable; skipping detection")
+        elif tag_image_source not in center_undistorted:
+            print(f"WARN: tag_image_source '{tag_image_source}' not found in rectified frames")
+        elif camera_params is None:
+            print("WARN: Missing camera parameters; skipping AprilTag detection")
+        else:
+            try:
+                tags = at_detector.detect(center_undistorted[tag_image_source],
+                                          True, camera_params, tag_landing_size)
+            except Exception as e:
+                print(f"WARN: AprilTag detect error: {e}")
 
         is_landing_tag_detected = False
         H_camera_tag = None
