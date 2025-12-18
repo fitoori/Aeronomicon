@@ -141,7 +141,7 @@ print(f"INFO: Using connection_baudrate: {connection_baudrate}")
 print(f"INFO: Using vision_msg_hz: {vision_msg_hz}")
 print(f"INFO: Using landing_target_msg_hz: {landing_target_msg_hz}")
 print(f"INFO: Using confidence_msg_hz: {confidence_msg_hz}")
-print(f"INFO: Camera orientation: {camera_orientation} (0=forward/right-USB, 1=down/right-USB)")
+print(f"INFO: T265 orientation: {camera_orientation} (0=forward/right-USB, 1=down/right-USB)")
 print("INFO: Camera position offset:", "Enabled" if body_offset_enabled else "Disabled",
       f"({body_offset_x}, {body_offset_y}, {body_offset_z})")
 print("INFO: Compass:", "Enabled (north-aligned yaw)" if compass_enabled else "Disabled")
@@ -463,10 +463,10 @@ signal.signal(signal.SIGINT, _handle_sigint)
 # ------------------------------
 # Start up: RealSense & Vehicle
 # ------------------------------
-print("INFO: Connecting to RealSense camera...")
+print("INFO: Connecting to RealSense T265...")
 try:
     realsense_connect()
-    print("INFO: RealSense connected.")
+    print("INFO: RealSense T265 connected.")
 except Exception as e:
     print(f"WARN: RealSense initial connect failed: {e}")
     undistort_rectify, camera_params = restart_realsense_pipeline()
@@ -785,7 +785,7 @@ try:
                     H_camera_tag[0][3] = float(tag.pose_t[0])
                     H_camera_tag[1][3] = float(tag.pose_t[1])
                     H_camera_tag[2][3] = float(tag.pose_t[2])
-                    print(f"INFO: Detected landing tag {tag.tag_id} relative to camera at "
+                    print(f"INFO: Detected landing tag {tag.tag_id} relative to T265 at "
                           f"x:{H_camera_tag[0][3]:.3f}, y:{H_camera_tag[1][3]:.3f}, z:{H_camera_tag[2][3]:.3f}")
                     break  # Only care about the landing tag
 
