@@ -8,8 +8,7 @@ A collection of scripts and utilities to streamline working with Intel RealSense
 - **ONICS.py** – Complete rework of Thien94's script that adds logging and thread-management options.
 - **uplink.sh** – Bash script to manage an LTE uplink with self-recovery logic and a daily reboot at 01:00.
 - **logfix.py** – Post-processes `uplink.sh` logs into condensed, one-line-per-month reports.
-- **install_realsense.sh** – Accelerates installation of Intel RealSense libraries. _Currently untested._
-- **install_ros.sh** – Bootstraps ROS2 and `realsense-ros`. _Currently untested._
+- **install/** – Install helpers for dependencies, services, Intel RealSense, and ROS (including `install-deps.sh`, `install-services.sh`, `install_realsense.sh`, and `install_ros.sh`). _Currently untested._
 - **hall-monitor.sh** – Watches a single service and restarts it if it crashes.
 - **apriltags3.py** – Upstream apriltags dependency preserved for compatibility.
 - **t265_precland_apriltag.py** – Optimized fork of Thien94's script of the same name. _Currently untested._
