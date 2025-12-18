@@ -8,7 +8,7 @@
 # Self-healing LTE connection for when you need it most.
 # Messed up so bad you can't connect to your drone anymore?
 # If it has enough power to last until reboot time you get another shot!
-# Now integrates with ONICS to parse arming status before reboot.
+# Coordinates with ONICS arming locks before rebooting.
 
 # Requires: bash ≥ 4, sudo, iproute2, qmicli, udhcpc; jq optional 
 
@@ -32,6 +32,7 @@ readonly LOG_MAX_BYTES=$((1 * 1024 * 1024))            # rotate at 1 MiB
 readonly PING_TARGET="dataplicity.com"                 # website to ping when testing internet connectivity
 readonly WWAN_INTERFACE="wwan0"                        # LTE interface as parsed by ifconfig
 readonly APN="hologram"                                # APN to be passed to qmicli
+readonly QMI_TIMEOUT=30                                 # seconds before giving up on qmicli startup
 
 ## persistency-related parameters
 readonly PING_INTERVAL=300          # time between health checks (s)
@@ -42,30 +43,16 @@ readonly MAX_BACKOFF=900            # cap back-off (s)
 readonly DAILY_REBOOT_TIME="01:00"  # scheduled time to run reboot (local HH:MM; 24hr; empty ⇒ no reboot)
 readonly PRE_REBOOT_CHECK_SEC=45    # run arming check this many seconds prior to scheduled reboot
 
-## flight-related parameters
-readonly ARMING_STATUS_FILE="/home/pi/arming_status.json"
-readonly FRESH_THRESHOLD=600        # this value should be the maximum theoretical flight time of the vehicle (s)
+## arming-lock parameters
+ARMING_LOCK_DIR_DEFAULT="/run/watne"
+ARMING_LOCK_DIR="${ARMING_LOCK_DIR:-$ARMING_LOCK_DIR_DEFAULT}"
+ARMING_LOCK_FILE=""
 
-#─ STALE_AS_ARMED ─ what it does and why it matters ─
+set_lock_paths() {
+    ARMING_LOCK_FILE="$ARMING_LOCK_DIR/armed.lock"
+}
 
-#+----------+---------------------------+-------------------------+---------------------------+
-#| Setting  | When status file is       | Benefit                 | Risk / Cost               |
-#|          | missing or >10 min old    |                         |                           |
-#+==========+===========================+=========================+===========================+
-#| false    | Assume DISARMED → reboot  | • Box always reboots,   | • 1-in-a-million chance of|
-#|(default) | proceeds                  |   restoring control     |  rebooting mid-flight if  |
-#|          |                           | • Best for long ground  |  status feed dies during  |
-#|          |                           |  tests & unattended use |  a short flight           |
-#+----------+---------------------------+-------------------------+---------------------------+
-#| true     | Assume ARMED → cancel     | • Absolute guarantee    | • If status pipeline dies |
-#|          | reboot                    |   against airborne      |  vehicle may stay offline |
-#|          |                           |   reboot                |  forever                  |
-#+----------+---------------------------+-------------------------+---------------------------+
-
-# Choose **false** for availability (ground testing, weeks of uptime).  
-# Flip to **true** only when an in-air reboot is intolerable *and* you trust the status file to stay healthy.
-
-readonly STALE_AS_ARMED=false       # true ⇒ indicates whether the script should constitute a stale value as ARMED or DISARMED
+set_lock_paths
 ###############################################################################
 
 
@@ -81,6 +68,40 @@ log() { rotate_log; printf '%s %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$1" >>"$
 trap 'log "Termination caught – exiting."; exit 0' TERM INT
 trap 'log "Script aborted by set -e."; exit 1' ERR
 
+ensure_lock_dir() {
+    if [[ -e $ARMING_LOCK_DIR && ! -d $ARMING_LOCK_DIR ]]; then
+        log "Lock path $ARMING_LOCK_DIR is not a directory."
+        return 1
+    fi
+    if install -d -m 755 "$ARMING_LOCK_DIR"; then
+        return 0
+    fi
+
+    log "Failed to create lock directory $ARMING_LOCK_DIR; trying fallback."
+
+    local fallback="/tmp/watne"
+    if [[ $ARMING_LOCK_DIR == "$fallback" ]]; then
+        log "Fallback lock directory already in use; giving up."
+        return 1
+    fi
+
+    ARMING_LOCK_DIR="$fallback"
+    set_lock_paths
+
+    if [[ -e $ARMING_LOCK_DIR && ! -d $ARMING_LOCK_DIR ]]; then
+        log "Fallback lock path $ARMING_LOCK_DIR is not a directory."
+        return 1
+    fi
+
+    if install -d -m 755 "$ARMING_LOCK_DIR"; then
+        log "Using fallback lock directory $ARMING_LOCK_DIR."
+        return 0
+    fi
+
+    log "Failed to create fallback lock directory $ARMING_LOCK_DIR."
+    return 1
+}
+
 ############################# single-instance lock ############################
 exec 200>/run/uplink.lock
 flock -n 200 || { echo "uplink.sh already running – exit." >&2; exit 0; }
@@ -90,48 +111,35 @@ flock -n 200 || { echo "uplink.sh already running – exit." >&2; exit 0; }
 pre_reboot_safety_check() {
     log "Pre-reboot check…"
 
-    # read status -------------------------------------------------------------
-    if [[ -r $ARMING_STATUS_FILE ]]; then
-        if command -v jq >/dev/null 2>&1; then
-            armed=$(jq -r '.armed // empty' "$ARMING_STATUS_FILE" 2>/dev/null || true)
-            ts=$(jq  -r '.timestamp_utc // empty' "$ARMING_STATUS_FILE" 2>/dev/null || true)
-        else
-            armed=$(awk '/"armed":/{gsub(/[^tf]/,"");print;exit}' "$ARMING_STATUS_FILE")
-            ts=$(awk -F'"' '/"timestamp_utc":/{print $4;exit}' "$ARMING_STATUS_FILE")
-        fi
-    fi
-
-    # missing or corrupt file -------------------------------------------------
-    if [[ -z ${armed:-} || -z ${ts:-} ]]; then
-        $STALE_AS_ARMED && { log "Status missing/corrupt – cancelling reboot."; sudo shutdown -c; return 1; }
-        log "Status missing/corrupt – proceeding with reboot."
-        return 0
-    fi
-
-    # freshness check ---------------------------------------------------------
-    ts_epoch=$(date -d "$ts" +%s 2>/dev/null) || {
-        $STALE_AS_ARMED && { log "Timestamp parse fail – cancelling reboot."; sudo shutdown -c; return 1; }
-        log "Timestamp parse fail – proceeding with reboot."
-        return 0
-    }
-
-    age=$(( $(date -u +%s) - ts_epoch ))
-
-    if (( age > FRESH_THRESHOLD )); then
-        $STALE_AS_ARMED && { log "Status stale (${age}s) – cancelling reboot."; sudo shutdown -c; return 1; }
-        log "Status stale (${age}s) – proceeding with reboot."
-        return 0
-    fi
-
-    # fresh record ------------------------------------------------------------
-    if [[ $armed == "true" ]]; then
-        log "Vehicle ARMED (fresh) – cancelling reboot."
+    if ! ensure_lock_dir; then
+        log "Arming lock directory invalid – cancelling reboot."
         sudo shutdown -c
         return 1
     fi
 
-    log "Vehicle DISARMED (fresh) – proceeding with reboot."
-    return 0
+    local lockfd
+    if ! exec {lockfd}>"$ARMING_LOCK_FILE"; then
+        log "Unable to open arming lock file – cancelling reboot."
+        sudo shutdown -c
+        return 1
+    fi
+
+    if flock -n "$lockfd"; then
+        log "Vehicle DISARMED – proceeding with reboot."
+        flock -u "$lockfd" || true
+        exec {lockfd}>&-
+        return 0
+    fi
+
+    local rc=$?
+    if (( rc == 1 )); then
+        log "Vehicle ARMED – cancelling reboot."
+    else
+        log "Arming lock check error (rc=$rc) – cancelling reboot."
+    fi
+    sudo shutdown -c
+    exec {lockfd}>&-
+    return 1
 }
 
 ############################## reboot scheduler ###############################
@@ -164,12 +172,38 @@ discover_wdm() {
         | grep -o 'cdc-wdm[0-9]*' || echo "cdc-wdm0"
 }
 toggle_raw_ip() { f="/sys/class/net/$WWAN_INTERFACE/qmi/raw_ip"; [[ -w $f ]] && echo Y | sudo tee "$f" >/dev/null || log "raw_ip toggle unavailable"; }
-qmi_start() { sudo qmicli -p -d "/dev/$(discover_wdm)" --device-open-net='net-raw-ip|net-no-qos-header' --wds-start-network="apn='$APN',ip-type=4" --client-no-release-cid; }
+qmi_start() { timeout "$QMI_TIMEOUT" sudo qmicli -p -d "/dev/$(discover_wdm)" --device-open-net='net-raw-ip|net-no-qos-header' --wds-start-network="apn='$APN',ip-type=4" --client-no-release-cid; }
 dhcp_lease() { timeout 20s sudo udhcpc -q -i "$WWAN_INTERFACE" &>/dev/null; }
 check_connection() { loss=$(ping -I "$WWAN_INTERFACE" -c 3 -W 3 "$PING_TARGET" | awk -F', ' '/packet loss/{print $(NF-2)+0}' || echo 100); (( loss >= 100 )) && { log "Ping FAIL – ${loss}%."; return 1; }; log "Ping OK – ${loss}%."; }
-reconnect_wwan() { log "Re-initialising $WWAN_INTERFACE…"; sudo ip link set "$WWAN_INTERFACE" down; toggle_raw_ip; sudo ip link set "$WWAN_INTERFACE" up; qmi_start && log "QMI up" || log "QMI fail"; dhcp_lease && log "DHCP ok" || log "DHCP fail"; }
+reconnect_wwan() {
+    log "Re-initialising $WWAN_INTERFACE…"
+    sudo ip link set "$WWAN_INTERFACE" down
+    toggle_raw_ip
+    sudo ip link set "$WWAN_INTERFACE" up
+
+    if qmi_start; then
+        log "QMI up"
+    else
+        status=$?
+        log "QMI fail (exit $status)"
+    fi
+
+    dhcp_lease && log "DHCP ok" || log "DHCP fail"
+}
 safe_kill_tools() { sudo pkill -x -f '^qmicli .*(--wds-start-network|--wda-.*-data-.*)$' || true; sudo pkill -x udhcpc || true; sudo pkill -o -x ping -f " -I $WWAN_INTERFACE " || true; }
-handle_retries() { retries=$1; (( retries >= MAX_RETRIES )) && { log "Max retries – forcing reboot."; sudo reboot; }; backoff=$(( RETRY_INTERVAL << retries )); (( backoff > MAX_BACKOFF )) && backoff=$MAX_BACKOFF; log "Retry $(( retries + 1 ))/$MAX_RETRIES – sleep ${backoff}s."; reconnect_wwan; sleep "$backoff"; }
+handle_retries() {
+    retries=$1
+    (( retries >= MAX_RETRIES )) && { log "Max retries – forcing reboot."; sudo reboot; }
+
+    safe_kill_tools
+
+    backoff=$(( RETRY_INTERVAL << retries ))
+    (( backoff > MAX_BACKOFF )) && backoff=$MAX_BACKOFF
+
+    log "Retry $(( retries + 1 ))/$MAX_RETRIES – sleep ${backoff}s."
+    reconnect_wwan
+    sleep "$backoff"
+}
 
 ################################## startup ###################################
 log "========== LTE-uplink script started =========="

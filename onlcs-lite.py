@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
 ONICS‑lite – RealSense supervisor
---------------------------------
+---------------------------------
 Based on ONICS2.py (Mk.II v0.5.3), this trimmed‑down version
 runs only the RealSense bridges for the T‑265 and D4xx devices.
 It watches for cameras connecting/disconnecting and restarts the
 helper scripts when needed.  MAVProxy and cruise‑speed syncing
-have been removed – run MAVProxy as a separate service.
+have been removed – run MAVProxy as a separate service.  The
+T‑265 bridge uses the dedicated ONICS‑T wrapper (onics-t.py);
+the D4xx bridge uses d4xx_to_mavlink.py.
 
 Environment variables (defaults in brackets):
   ONICS_LOG             Log file path [/home/pi/onics.log]
-  ONICS_ARM_JSON        Arming-status JSON [/home/pi/arming_status.json]
   ONICS_MAV_PORT        MAVLink input for arming monitor [127.0.0.1:14550]
   ONICS_T265_PORT       UDP out port for T265 [127.0.0.1:14540]
   ONICS_D4_PORT         UDP out port for D4XX [127.0.0.1:14560]
@@ -23,7 +24,7 @@ T‑265 gate:
 
 Runtime flags:
   -e / --enumerate      List connected RealSense devices and exit
-  -a / --disable-arming Skip writing arming-status JSON
+  -a / --disable-arming Skip managing the arming lock
   -d / --disable-t265   Skip launching the T265 helper
   -t / --disable-d4xx   Skip launching the D4XX helper
 """
@@ -31,6 +32,7 @@ Runtime flags:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import logging
 import logging.handlers
@@ -44,9 +46,8 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 # ───────────────────────── cadence constants ─────────────────────────
 SLEEP_FAST = 0.25
@@ -80,6 +81,76 @@ def ensure_dir(path: Path) -> None:
     except PermissionError as exc:
         sys.exit(f"Cannot create directory {path}: {exc}")
 
+
+def ensure_lock_dir() -> None:
+    """Create and validate the lock directory."""
+
+    for candidate in (LOCK_DIR, FALLBACK_LOCK_DIR):
+        if not candidate.is_absolute():
+            sys.exit(f"Lock directory must be absolute: {candidate}")
+
+        try:
+            candidate.mkdir(mode=0o755, parents=True, exist_ok=True)
+        except PermissionError as exc:
+            logging.warning("Cannot create lock directory %s: %s", candidate, exc)
+            continue
+        except OSError as exc:
+            sys.exit(f"Cannot create lock directory {candidate}: {exc}")
+
+        if not candidate.is_dir():
+            logging.warning("Lock directory path is not a directory: %s", candidate)
+            continue
+
+        try:
+            os.chmod(candidate, 0o755)
+        except OSError as exc:
+            logging.warning("Unable to set permissions on %s: %s", candidate, exc)
+
+        _set_lock_paths(candidate)
+        return
+
+    sys.exit(f"Unable to establish lock directory; tried {LOCK_DIR} and {FALLBACK_LOCK_DIR}")
+
+
+def _validate_lock_path(path: Path) -> None:
+    if not path.is_absolute():
+        raise ValueError(f"Lock path must be absolute: {path}")
+    if path.parent != LOCK_DIR:
+        raise ValueError(f"Lock path must reside within {LOCK_DIR}: {path}")
+    if path.exists() and path.is_dir():
+        raise ValueError(f"Lock path points to a directory: {path}")
+
+
+def _open_lock_file(path: Path) -> int:
+    _validate_lock_path(path)
+    try:
+        return os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as exc:
+        raise OSError(f"Unable to open lock file {path}: {exc}") from exc
+
+
+def _acquire_lock(fd: int, path: Path) -> None:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise RuntimeError(f"Lock already held: {path}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"Unable to acquire lock {path}: {exc}") from exc
+
+
+def _release_lock(fd: int, path: Path) -> None:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError as exc:
+        logging.error("Failed to release lock %s: %s", path, exc)
+
+
+def _close_fd(fd: int, path: Path) -> None:
+    try:
+        os.close(fd)
+    except OSError as exc:
+        logging.error("Failed to close lock file %s: %s", path, exc)
+
 def _validate_udp_hostport(hp: str) -> str:
     """Validate a UDP host:port string."""
     try:
@@ -104,11 +175,22 @@ def _jittered(v: float) -> float:
 LOG_FILE_PATH = Path(env_path("ONICS_LOG", "/home/pi/onics.log"))
 ensure_dir(LOG_FILE_PATH.parent)
 
-# Arming-status output for uplink/reboot coordination
-STATUS_FILE = Path(env_path("ONICS_ARM_JSON", "/home/pi/arming_status.json"))
-ensure_dir(STATUS_FILE.parent)
+DEFAULT_LOCK_DIR = Path("/run/watne")
+FALLBACK_LOCK_DIR = Path("/tmp/watne")
+LOCK_DIR = Path(env_path("ONICS_LOCK_DIR", str(DEFAULT_LOCK_DIR)))
 
-# MAVLink input used only for arming status
+if not LOCK_DIR.is_absolute():
+    sys.exit(f"Lock directory must be absolute: {LOCK_DIR}")
+
+def _set_lock_paths(lock_dir: Path) -> None:
+    global LOCK_DIR, ONICS_LOCK_PATH, ARMED_LOCK_PATH
+    LOCK_DIR = lock_dir
+    ONICS_LOCK_PATH = LOCK_DIR / "onics.lock"
+    ARMED_LOCK_PATH = LOCK_DIR / "armed.lock"
+
+_set_lock_paths(LOCK_DIR)
+
+# MAVLink input used only for arming lock tracking
 CONN_IN_PORT = _validate_udp_hostport(os.getenv("ONICS_MAV_PORT", "127.0.0.1:14550"))
 
 # UDP endpoints for the RealSense bridges
@@ -162,7 +244,8 @@ def setup_worker_logging() -> None:
 # ───────────────────── path/helpers ─────────────────────
 SCRIPT_DIR = Path(__file__).resolve().parent
 D4_SCRIPT = SCRIPT_DIR / "d4xx_to_mavlink.py"
-T265_SCRIPT = SCRIPT_DIR / "t265_precland_apriltags.py"
+# Use the dedicated ONICS‑T wrapper for the T265 instead of the legacy bridge
+T265_SCRIPT = SCRIPT_DIR / "onics-t.py"
 
 def require_cmd(cmd: str) -> None:
     """Ensure a command exists in PATH."""
@@ -179,7 +262,6 @@ def require_file(p: Path) -> None:
 def preflight() -> None:
     """Perform pre‑flight checks: ensure dependencies and helper scripts exist."""
     ensure_dir(LOG_FILE_PATH.parent)
-    ensure_dir(STATUS_FILE.parent)
     require_cmd("python3")
     require_cmd("rs-enumerate-devices")
     require_file(T265_SCRIPT)
@@ -230,6 +312,24 @@ def enumerate_devices() -> None:
             print(" ", h)
     else:
         print("No relevant RealSense devices found.")
+
+
+# ───────────────────────── lock helpers ─────────────────────────
+def acquire_onics_lock() -> int:
+    ensure_lock_dir()
+    try:
+        fd = _open_lock_file(ONICS_LOCK_PATH)
+        _acquire_lock(fd, ONICS_LOCK_PATH)
+        return fd
+    except Exception as exc:
+        sys.exit(f"Unable to secure ONICS lock: {exc}")
+
+
+def release_onics_lock(fd: Optional[int]) -> None:
+    if fd is None:
+        return
+    _release_lock(fd, ONICS_LOCK_PATH)
+    _close_fd(fd, ONICS_LOCK_PATH)
 
 # ───────────────────── subprocess utilities ─────────────────────
 def _popen(cmd: List[str]) -> subprocess.Popen:
@@ -294,7 +394,7 @@ def run_d4xx() -> None:
     device_loop("D4", D4_SCRIPT, CONN_OUT_P02)
 
 def run_t265() -> None:
-    """Launch and supervise the T265 helper with gating flags."""
+    """Launch and supervise the ONICS‑T helper with gating flags."""
     flags: List[str] = []
     if T265_GATE:
         flags.append("--gate")
@@ -314,21 +414,28 @@ from pymavlink import mavutil
 
 _last_arm_state: Optional[bool] = None
 
-def _write_arm_json(armed: bool) -> None:
-    tmp = STATUS_FILE.with_suffix(".tmp")
-    payload: Dict[str, object] = {
-        "armed": armed,
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-    with open(tmp, "w", encoding="utf-8") as fp:
-        json.dump(payload, fp)
-        fp.flush()
-        os.fsync(fp.fileno())
-    tmp.replace(STATUS_FILE)
+def _close_armed_fd(fd: Optional[int]) -> None:
+    if fd is None:
+        return
+    _release_lock(fd, ARMED_LOCK_PATH)
+    _close_fd(fd, ARMED_LOCK_PATH)
+
 
 def monitor_arming() -> None:
     setup_worker_logging()
+    ensure_lock_dir()
     global _last_arm_state
+    armed_fd: Optional[int] = None
+
+    def _shutdown(signo: int, _frm) -> None:
+        logging.info("Arming monitor shutdown signal %d", signo)
+        _close_armed_fd(armed_fd)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGHUP, _shutdown)
+
     while True:
         try:
             mav = mavutil.mavlink_connection(f"udp:{CONN_IN_PORT}", input=False)
@@ -339,15 +446,26 @@ def monitor_arming() -> None:
                     break
                 armed = bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
                 if armed != _last_arm_state:
-                    _last_arm_state = armed
                     try:
-                        _write_arm_json(armed)
+                        if armed:
+                            fd = _open_lock_file(ARMED_LOCK_PATH)
+                            _acquire_lock(fd, ARMED_LOCK_PATH)
+                            armed_fd = fd
+                        else:
+                            _close_armed_fd(armed_fd)
+                            armed_fd = None
+                        _last_arm_state = armed
                         logging.info("Armed state → %s", armed)
-                    except OSError as exc:
-                        logging.error("Arming JSON write failed: %s", exc)
+                    except Exception as exc:
+                        logging.error("Arming lock update failed: %s", exc)
+                        time.sleep(SLEEP_FAST)
         except Exception as exc:
             logging.error("Arming monitor error: %s", exc)
             time.sleep(SLEEP_SLOW)
+        finally:
+            if armed_fd is not None and _last_arm_state is False:
+                _close_armed_fd(armed_fd)
+                armed_fd = None
 
 # ───────────────────── process supervision ─────────────────────
 @dataclass
@@ -403,6 +521,8 @@ def supervise(specs: List[ProcSpec]) -> None:
 def main() -> None:
     mp.set_start_method("fork", force=True)
     setup_master_logging()
+    ensure_lock_dir()
+    onics_lock_fd = acquire_onics_lock()
     preflight()
 
     ap = argparse.ArgumentParser(
@@ -415,7 +535,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("-e", "--enumerate", action="store_true", help="List connected RealSense devices and exit")
-    ap.add_argument("-a", "--disable-arming", action="store_true", help="Skip writing arming-status JSON")
+    ap.add_argument("-a", "--disable-arming", action="store_true", help="Skip managing the arming lock")
     ap.add_argument("-d", "--disable-t265", action="store_true", help="Skip launching the T265 helper")
     ap.add_argument("-t", "--disable-d4xx", action="store_true", help="Skip launching the D4xx helper")
     ap.add_argument("-V", "--version", action="version", version="ONICS‑lite v0.1.0")
@@ -423,8 +543,8 @@ def main() -> None:
 
     # dump config once
     logging.info(
-        "Config: in_mav=udp:%s status=%s out_t265=udp:%s out_d4=udp:%s; gate=%s hi=%.2f lo=%.2f on=%.2f",
-        CONN_IN_PORT, STATUS_FILE,
+        "Config: in_mav=udp:%s locks=%s/%s out_t265=udp:%s out_d4=udp:%s; gate=%s hi=%.2f lo=%.2f on=%.2f",
+        CONN_IN_PORT, ONICS_LOCK_PATH, ARMED_LOCK_PATH,
         CONN_OUT_P01, CONN_OUT_P02,
         T265_GATE, T265_GATE_HI, T265_GATE_LO, T265_GATE_ON
     )
@@ -440,7 +560,7 @@ def main() -> None:
     if not args.disable_arming:
         specs.append(ProcSpec("arming", monitor_arming))
     if not args.disable_t265:
-        specs.append(ProcSpec("t265", run_t265))
+        specs.append(ProcSpec("onics-t", run_t265))
     if not args.disable_d4xx:
         specs.append(ProcSpec("d4xx", run_d4xx))
 
@@ -457,16 +577,19 @@ def main() -> None:
                 p.join(timeout=5)
         if _log_listener:
             _log_listener.stop()
+        release_onics_lock(onics_lock_fd)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGHUP, _shutdown)
 
     try:
         supervise(specs)
     finally:
         if _log_listener:
             _log_listener.stop()
+        release_onics_lock(onics_lock_fd)
 
 if __name__ == "__main__":
     main()

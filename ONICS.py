@@ -15,12 +15,68 @@ import logging
 import time
 import os
 import argparse
+from pathlib import Path
 
-# Default log file path
-log_file_path = "/home/pi/onics.log"
+LOG_ENV_VAR = "ONICS_LOG_PATH"
+DEFAULT_LOG_FILE = Path("/home/pi/onics.log")
 
-# Configure logging
-logging.basicConfig(filename=log_file_path, level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+def _prepare_log_file():
+    """Find a writable log file path and ensure it exists.
+
+    We try, in order:
+    1. A path specified via the ONICS_LOG_PATH environment variable.
+    2. The historical default /home/pi/onics.log path.
+    3. $HOME/onics.log
+    4. ./onics.log (the current working directory)
+
+    Returning None signals that no writable path could be found, in which
+    case we will fall back to console logging only.
+    """
+
+    candidates = []
+    env_path = os.environ.get(LOG_ENV_VAR)
+    if env_path:
+        candidates.append(Path(env_path))
+
+    candidates.extend(
+        [
+            DEFAULT_LOG_FILE,
+            Path.home() / "onics.log",
+            Path.cwd() / "onics.log",
+        ]
+    )
+
+    for candidate in candidates:
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.touch(exist_ok=True)
+        except OSError:
+            continue
+        return candidate
+
+    return None
+
+
+_log_path = _prepare_log_file()
+log_file_path = str(_log_path) if _log_path else None
+
+if _log_path:
+    logging.basicConfig(
+        filename=log_file_path,
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler()],
+    )
+    logging.warning(
+        "Unable to create a log file using %s; falling back to console logging.",
+        LOG_ENV_VAR,
+    )
 
 # Define connection parameters
 connection_in_port = "127.0.0.1:14550"
@@ -88,15 +144,44 @@ def run_t265():
             break
         time.sleep(1)
 
+def ensure_log_file():
+    """Ensure the log file exists so log tailing does not crash."""
+    if not log_file_path:
+        return False
+
+    log_path = Path(log_file_path)
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.touch(exist_ok=True)
+    except OSError as exc:
+        logging.error("Failed to create log file '%s': %s", log_path, exc)
+        return False
+
+    return True
+
+
 def publish_logs():
-    with open(log_file_path, 'r') as logfile:
-        logfile.seek(0, os.SEEK_END)
-        while True:
-            line = logfile.readline()
-            if line:
-                print(line.strip())
-            else:
-                time.sleep(1)
+    if not log_file_path:
+        logging.info("Skipping log publishing because no log file path is available.")
+        return
+
+    log_path = Path(log_file_path)
+
+    while True:
+        if not ensure_log_file():
+            time.sleep(1)
+            continue
+
+        with open(log_path, "a+") as logfile:
+            logfile.seek(0, os.SEEK_END)
+            while True:
+                line = logfile.readline()
+                if line:
+                    print(line.strip())
+                else:
+                    if not log_path.exists():
+                        break
+                    time.sleep(1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ONICS - Optical Navigation and Interference Control System")
