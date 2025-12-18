@@ -106,17 +106,6 @@ tag_image_source = "right"   # T265 supports "left" or "right"
 # Shutdown event (set on SIGTERM/SIGINT)
 shutdown_event = threading.Event()
 
-# Cached status exposed via optional web server
-status_snapshot = {
-    "timestamp_us": None,
-    "pose_confidence": None,
-    "landing_tag_detected": False,
-    "landing_tag_pose_m": None,
-    "vision_rate_hz": vision_msg_hz,
-    "performance": None,
-}
-status_lock = threading.Lock()
-
 # ------------------------------
 # CLI args
 # ------------------------------
@@ -148,6 +137,20 @@ camera_orientation     = coalesce(args.camera_orientation, camera_orientation_de
 web_enabled            = bool(args.enable_web)
 web_port               = args.web_port
 debug_enable           = 1 if (args.debug_enable and int(args.debug_enable) == 1) else 0
+
+# Cached status exposed via optional web server
+status_snapshot = {
+    "timestamp_us": None,
+    "pose_confidence": None,
+    "landing_tag_detected": False,
+    "landing_tag_pose_m": None,
+    "vision_rate_hz": vision_msg_hz_default,
+    "performance": None,
+}
+status_lock = threading.Lock()
+
+# Sync cached status with runtime-configured vision rate
+status_snapshot["vision_rate_hz"] = vision_msg_hz
 
 print(f"INFO: Using connection_string: {connection_string}")
 print(f"INFO: Using connection_baudrate: {connection_baudrate}")
