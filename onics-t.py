@@ -230,6 +230,53 @@ def create_apriltag_detector():
 at_detector = create_apriltag_detector()
 
 
+def _estimate_tag_pose_cv(tag, camera_params, tag_size):
+    """Estimate tag pose using OpenCV to avoid native AprilTag pose crashes."""
+    if tag is None or getattr(tag, "corners", None) is None:
+        return None
+
+    try:
+        fx, fy, cx, cy = map(float, camera_params)
+    except Exception:
+        return None
+
+    if not all(m.isfinite(v) and v > 0 for v in (fx, fy)) or not all(m.isfinite(v) for v in (cx, cy)):
+        return None
+
+    if tag_size is None or not m.isfinite(tag_size) or tag_size <= 0:
+        return None
+
+    half = float(tag_size) / 2.0
+    obj_pts = np.array(
+        [
+            [-half,  half, 0.0],
+            [ half,  half, 0.0],
+            [ half, -half, 0.0],
+            [-half, -half, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    img_pts = np.array(tag.corners, dtype=np.float32).reshape(4, 2)
+
+    K = np.array([[fx, 0.0, cx],
+                  [0.0, fy, cy],
+                  [0.0, 0.0, 1.0]], dtype=np.float64)
+    dist = np.zeros((4, 1), dtype=np.float64)
+
+    solvepnp_flag = getattr(cv2, "SOLVEPNP_IPPE_SQUARE", cv2.SOLVEPNP_ITERATIVE)
+    ok, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, K, dist, flags=solvepnp_flag)
+    if not ok:
+        return None
+
+    tag.pose_t = np.array(tvec, dtype=np.float64).reshape(3, 1)
+    try:
+        rot_mtx, _ = cv2.Rodrigues(rvec)
+        tag.pose_R = np.array(rot_mtx, dtype=np.float64).reshape(3, 3)
+    except Exception:
+        tag.pose_R = None
+    return tag.pose_t
+
+
 def _detect_apriltags(center_undistorted, camera_params, image_source):
     """Detect AprilTags with guarded source selection and error handling."""
     if at_detector is None:
@@ -260,10 +307,14 @@ def _detect_apriltags(center_undistorted, camera_params, image_source):
     frame_u8 = np.ascontiguousarray(frame, dtype=np.uint8)
 
     try:
-        return at_detector.detect(frame_u8, True, camera_params, tag_landing_size)
+        detections = at_detector.detect(frame_u8, False)
     except Exception as e:
         print(f"WARN: AprilTag detect error on {source} image: {e}")
         return []
+
+    for det in detections:
+        _estimate_tag_pose_cv(det, camera_params, tag_landing_size)
+    return detections
 
 # ------------------------------
 # MAVLink helpers
@@ -850,6 +901,10 @@ try:
         if tags:
             for tag in tags:
                 if int(tag.tag_id) == int(tag_landing_id):
+                    if getattr(tag, "pose_t", None) is None:
+                        print(f"WARN: Landing tag {tag.tag_id} detected but pose estimation failed.")
+                        break
+
                     is_landing_tag_detected = True
                     H_camera_tag = tf.euler_matrix(0, 0, 0, 'sxyz')
                     H_camera_tag[0][3] = float(tag.pose_t[0])
