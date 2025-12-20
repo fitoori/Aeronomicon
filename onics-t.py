@@ -232,6 +232,10 @@ at_detector = create_apriltag_detector()
 
 def _detect_apriltags(center_undistorted, camera_params, image_source):
     """Detect AprilTags with guarded source selection and error handling."""
+    if at_detector is None:
+        print("WARN: AprilTag detector unavailable; skipping detection.")
+        return []
+
     if camera_params is None:
         print("WARN: Missing camera parameters; skipping AprilTag detection.")
         return []
@@ -248,8 +252,15 @@ def _detect_apriltags(center_undistorted, camera_params, image_source):
         print("WARN: No valid image source available for AprilTag detection.")
         return []
 
+    frame = center_undistorted[source]
+    if frame is None:
+        print(f"WARN: AprilTag source '{source}' frame is None; skipping detection.")
+        return []
+
+    frame_u8 = np.ascontiguousarray(frame, dtype=np.uint8)
+
     try:
-        return at_detector.detect(center_undistorted[source], True, camera_params, tag_landing_size)
+        return at_detector.detect(frame_u8, True, camera_params, tag_landing_size)
     except Exception as e:
         print(f"WARN: AprilTag detect error on {source} image: {e}")
         return []
@@ -832,19 +843,6 @@ try:
 
         # AprilTag detection
         tags = _detect_apriltags(center_undistorted, camera_params, tag_image_source)
-        tags = []
-        if at_detector is None:
-            print("WARN: AprilTag detector unavailable; skipping detection")
-        elif tag_image_source not in center_undistorted:
-            print(f"WARN: tag_image_source '{tag_image_source}' not found in rectified frames")
-        elif camera_params is None:
-            print("WARN: Missing camera parameters; skipping AprilTag detection")
-        else:
-            try:
-                tags = at_detector.detect(center_undistorted[tag_image_source],
-                                          True, camera_params, tag_landing_size)
-            except Exception as e:
-                print(f"WARN: AprilTag detect error: {e}")
 
         is_landing_tag_detected = False
         H_camera_tag = None
@@ -884,4 +882,3 @@ finally:
         pass
     print("INFO: RealSense pipeline and vehicle closed. Exiting.")
     sys.exit(0)
-
