@@ -230,54 +230,7 @@ def create_apriltag_detector():
 at_detector = create_apriltag_detector()
 
 
-def _estimate_tag_pose_cv(tag, camera_params, tag_size):
-    """Estimate tag pose using OpenCV to avoid native AprilTag pose crashes."""
-    if tag is None or getattr(tag, "corners", None) is None:
-        return None
-
-    try:
-        fx, fy, cx, cy = map(float, camera_params)
-    except Exception:
-        return None
-
-    if not all(m.isfinite(v) and v > 0 for v in (fx, fy)) or not all(m.isfinite(v) for v in (cx, cy)):
-        return None
-
-    if tag_size is None or not m.isfinite(tag_size) or tag_size <= 0:
-        return None
-
-    half = float(tag_size) / 2.0
-    obj_pts = np.array(
-        [
-            [-half,  half, 0.0],
-            [ half,  half, 0.0],
-            [ half, -half, 0.0],
-            [-half, -half, 0.0],
-        ],
-        dtype=np.float32,
-    )
-    img_pts = np.array(tag.corners, dtype=np.float32).reshape(4, 2)
-
-    K = np.array([[fx, 0.0, cx],
-                  [0.0, fy, cy],
-                  [0.0, 0.0, 1.0]], dtype=np.float64)
-    dist = np.zeros((4, 1), dtype=np.float64)
-
-    solvepnp_flag = getattr(cv2, "SOLVEPNP_IPPE_SQUARE", cv2.SOLVEPNP_ITERATIVE)
-    ok, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, K, dist, flags=solvepnp_flag)
-    if not ok:
-        return None
-
-    tag.pose_t = np.array(tvec, dtype=np.float64).reshape(3, 1)
-    try:
-        rot_mtx, _ = cv2.Rodrigues(rvec)
-        tag.pose_R = np.array(rot_mtx, dtype=np.float64).reshape(3, 3)
-    except Exception:
-        tag.pose_R = None
-    return tag.pose_t
-
-
-def _detect_apriltags(center_undistorted, camera_params, image_source):
+def _detect_apriltags(frames, camera_params, image_source):
     """Detect AprilTags with guarded source selection and error handling."""
     if at_detector is None:
         print("WARN: AprilTag detector unavailable; skipping detection.")
@@ -287,10 +240,10 @@ def _detect_apriltags(center_undistorted, camera_params, image_source):
         print("WARN: Missing camera parameters; skipping AprilTag detection.")
         return []
 
-    source = image_source if image_source in center_undistorted else None
+    source = image_source if image_source in frames else None
     if source is None:
         for fallback in ("right", "left"):
-            if fallback in center_undistorted:
+            if fallback in frames:
                 print(f"WARN: AprilTag source '{image_source}' unavailable; using '{fallback}' instead.")
                 source = fallback
                 break
@@ -299,7 +252,7 @@ def _detect_apriltags(center_undistorted, camera_params, image_source):
         print("WARN: No valid image source available for AprilTag detection.")
         return []
 
-    frame = center_undistorted[source]
+    frame = frames[source]
     if frame is None:
         print(f"WARN: AprilTag source '{source}' frame is None; skipping detection.")
         return []
@@ -307,13 +260,10 @@ def _detect_apriltags(center_undistorted, camera_params, image_source):
     frame_u8 = np.ascontiguousarray(frame, dtype=np.uint8)
 
     try:
-        detections = at_detector.detect(frame_u8, False)
+        detections = at_detector.detect(frame_u8, True, camera_params, tag_landing_size)
     except Exception as e:
         print(f"WARN: AprilTag detect error on {source} image: {e}")
         return []
-
-    for det in detections:
-        _estimate_tag_pose_cv(det, camera_params, tag_landing_size)
     return detections
 
 # ------------------------------
@@ -547,7 +497,13 @@ def init_rectification_and_params(pipeline):
     undistort_rectify = {"left": (lm1, lm2), "right": (rm1, rm2)}
 
     camera_params = [stereo_focal_px, stereo_focal_px, stereo_cx, stereo_cy]
-    return undistort_rectify, camera_params
+    raw_camera_params = [
+        intrinsics["right"].fx,
+        intrinsics["right"].fy,
+        intrinsics["right"].ppx,
+        intrinsics["right"].ppy,
+    ]
+    return undistort_rectify, camera_params, raw_camera_params
 
 def restart_realsense_pipeline(backoff_s=2.0, max_backoff_s=30.0):
     """Restart RealSense pipeline with exponential backoff, unless shutting down."""
@@ -562,15 +518,15 @@ def restart_realsense_pipeline(backoff_s=2.0, max_backoff_s=30.0):
                     pass
             print("INFO: Restarting RealSense pipeline...")
             realsense_connect()
-            undistort_rectify, camera_params = init_rectification_and_params(pipe)
+            undistort_rectify, camera_params, raw_camera_params = init_rectification_and_params(pipe)
             print("INFO: RealSense restarted.")
-            return undistort_rectify, camera_params
+            return undistort_rectify, camera_params, raw_camera_params
         except Exception as e:
             print(f"WARN: RealSense restart failed: {e}. Retrying in {delay:.1f}s...")
             time.sleep(delay)
             delay = min(delay * 2.0, max_backoff_s)
     print("INFO: Skipping RealSense restart because shutdown was requested.")
-    return None, None
+    return None, None, None
 
 # ------------------------------
 # Signal handling (graceful stop)
@@ -595,9 +551,9 @@ try:
     print("INFO: RealSense T265 connected.")
 except Exception as e:
     print(f"WARN: RealSense initial connect failed: {e}")
-    undistort_rectify, camera_params = restart_realsense_pipeline()
+    undistort_rectify, camera_params, raw_camera_params = restart_realsense_pipeline()
 else:
-    undistort_rectify, camera_params = init_rectification_and_params(pipe)
+    undistort_rectify, camera_params, raw_camera_params = init_rectification_and_params(pipe)
 
 print("INFO: Connecting to vehicle...")
 while not shutdown_event.is_set() and not vehicle_connect():
@@ -805,7 +761,7 @@ try:
             print(f"WARN: RealSense frames error: {e}")
             if shutdown_event.is_set():
                 break
-            undistort_rectify, camera_params = restart_realsense_pipeline()
+            undistort_rectify, camera_params, raw_camera_params = restart_realsense_pipeline()
             if undistort_rectify is None:
                 break
             continue
@@ -864,7 +820,7 @@ try:
             print(f"WARN: RealSense image fetch error: {e}")
             if shutdown_event.is_set():
                 break
-            undistort_rectify, camera_params = restart_realsense_pipeline()
+            undistort_rectify, camera_params, raw_camera_params = restart_realsense_pipeline()
             if undistort_rectify is None:
                 break
             continue
@@ -887,13 +843,13 @@ try:
             print(f"WARN: Rectification error: {e}")
             if shutdown_event.is_set():
                 break
-            undistort_rectify, camera_params = restart_realsense_pipeline()
+            undistort_rectify, camera_params, raw_camera_params = restart_realsense_pipeline()
             if undistort_rectify is None:
                 break
             continue
 
-        # AprilTag detection
-        tags = _detect_apriltags(center_undistorted, camera_params, tag_image_source)
+        # AprilTag detection (legacy-style raw frame + native pose estimation)
+        tags = _detect_apriltags(frame_copy, raw_camera_params, tag_image_source)
 
         is_landing_tag_detected = False
         H_camera_tag = None
@@ -901,10 +857,6 @@ try:
         if tags:
             for tag in tags:
                 if int(tag.tag_id) == int(tag_landing_id):
-                    if getattr(tag, "pose_t", None) is None:
-                        print(f"WARN: Landing tag {tag.tag_id} detected but pose estimation failed.")
-                        break
-
                     is_landing_tag_detected = True
                     H_camera_tag = tf.euler_matrix(0, 0, 0, 'sxyz')
                     H_camera_tag[0][3] = float(tag.pose_t[0])
