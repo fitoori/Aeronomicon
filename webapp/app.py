@@ -73,10 +73,14 @@ if _missing:  # pragma: no cover
 APP_TITLE = "ONICS-T"
 TAILNET_HOSTNAME_DEFAULT = "watne.tail8d99b6.ts.net"
 
-TAILNET_HOSTNAME = os.environ.get("WATNE_TAILNET_HOST", TAILNET_HOSTNAME_DEFAULT).strip()
+TAILNET_HOSTNAME_ENV = os.environ.get("WATNE_TAILNET_HOST")
+TAILNET_HOSTNAME = (TAILNET_HOSTNAME_ENV or TAILNET_HOSTNAME_DEFAULT).strip()
 
-SSH_PORT = int(os.environ.get("WATNE_SSH_PORT", "22"))
-SSH_USER = os.environ.get("WATNE_SSH_USER", getpass.getuser()).strip()
+SSH_PORT_ENV = os.environ.get("WATNE_SSH_PORT")
+SSH_PORT = int(SSH_PORT_ENV or "22")
+SSH_USER_ENV = os.environ.get("WATNE_SSH_USER")
+SSH_USER = (SSH_USER_ENV or getpass.getuser()).strip()
+SSH_CONFIG_PATH = os.path.expanduser(os.environ.get("WATNE_SSH_CONFIG", "~/.ssh/config"))
 
 # Remote script path (as provided)
 REMOTE_ONICS_T_PATH = "~/Aeronomicon/onics-t.py"
@@ -124,6 +128,20 @@ def safe_json_dumps(obj: Any) -> str:
 def which_or_none(exe: str) -> Optional[str]:
     p = shutil.which(exe)
     return p if p else None
+
+
+def load_ssh_config() -> Optional[paramiko.SSHConfig]:
+    if not SSH_CONFIG_PATH:
+        return None
+    if not os.path.exists(SSH_CONFIG_PATH):
+        return None
+    cfg = paramiko.SSHConfig()
+    try:
+        with open(SSH_CONFIG_PATH, "r", encoding="utf-8") as handle:
+            cfg.parse(handle)
+    except Exception:
+        return None
+    return cfg
 
 
 def resolve_host(hostname: str) -> Tuple[bool, List[str], str]:
@@ -298,18 +316,48 @@ class OnicsController:
             self._runtime.login_message = message if required else ""
         self._broker.publish("state", self.snapshot())
 
+    def _resolve_ssh_settings(
+        self,
+    ) -> Tuple[str, str, int, List[str], Optional[str]]:
+        cfg = load_ssh_config()
+        cfg_entry: Dict[str, Any] = cfg.lookup(TAILNET_HOSTNAME) if cfg else {}
+
+        hostname = cfg_entry.get("hostname", TAILNET_HOSTNAME)
+
+        username = SSH_USER
+        if SSH_USER_ENV is None and cfg_entry.get("user"):
+            username = str(cfg_entry["user"])
+
+        port = SSH_PORT
+        if SSH_PORT_ENV is None and cfg_entry.get("port"):
+            try:
+                port = int(cfg_entry["port"])
+            except (TypeError, ValueError):
+                port = SSH_PORT
+
+        identity_files = cfg_entry.get("identityfile", [])
+        if isinstance(identity_files, str):
+            identity_files = [identity_files]
+        identity_files = [os.path.expanduser(path) for path in identity_files if path]
+
+        proxycommand = cfg_entry.get("proxycommand")
+
+        return hostname, username, port, identity_files, proxycommand
+
     def _handle_ssh_failure(self, err: str) -> None:
         if self._needs_login_prompt(err):
+            hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
             msg = (
-                "SSH authentication not found. Run `ssh-copy-id -p 22 pi@watne.tail8d99b6.ts.net` "
-                "to set up your key, then open `ssh -p 22 pi@watne.tail8d99b6.ts.net` to continue."
+                "SSH authentication not found. Run "
+                f"`ssh-copy-id -p {port} {username}@{hostname}` to set up your key, "
+                f"then open `ssh -p {port} {username}@{hostname}` to continue."
             )
             if self._needs_keygen_prompt(err):
                 msg = (
                     "No SSH identities found. Generate one with "
                     "`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N \"\"`, "
-                    "then run `ssh-copy-id -p 22 pi@watne.tail8d99b6.ts.net` and "
-                    "`ssh -p 22 pi@watne.tail8d99b6.ts.net` to continue."
+                    f"then run `ssh-copy-id -p {port} {username}@{hostname}` and "
+                    f"`ssh -p {port} {username}@{hostname}` to continue."
                 )
             self._set_login_prompt(True, msg)
             self._append_log("SSH AUTH REQUIRED: interactive login needed to continue.")
@@ -317,6 +365,7 @@ class OnicsController:
             self._set_login_prompt(False, "")
 
     def snapshot(self) -> Dict[str, Any]:
+        hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
         with self._lock:
             rt = dataclasses.asdict(self._runtime)
             hl = dataclasses.asdict(self._health)
@@ -342,9 +391,9 @@ class OnicsController:
         return {
             "meta": {
                 "title": APP_TITLE,
-                "hostname": TAILNET_HOSTNAME,
-                "ssh_user": SSH_USER,
-                "ssh_port": SSH_PORT,
+                "hostname": hostname,
+                "ssh_user": username,
+                "ssh_port": port,
                 "server_time_iso": wall_time_iso(),
             },
             "health": hl,
@@ -547,21 +596,35 @@ class OnicsController:
         start = time.time()
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        hostname, username, port, identity_files, proxycommand = self._resolve_ssh_settings()
+        sock = None
+        if proxycommand:
+            try:
+                sock = paramiko.ProxyCommand(proxycommand)
+            except Exception:
+                sock = None
 
         try:
             client.connect(
-                hostname=TAILNET_HOSTNAME,
-                port=SSH_PORT,
-                username=SSH_USER,
+                hostname=hostname,
+                port=port,
+                username=username,
                 timeout=SSH_CONNECT_TIMEOUT_S,
                 banner_timeout=SSH_BANNER_TIMEOUT_S,
                 auth_timeout=SSH_AUTH_TIMEOUT_S,
                 allow_agent=True,
                 look_for_keys=True,
+                key_filename=identity_files or None,
+                sock=sock,
             )
             ms = int((time.time() - start) * 1000)
             return client, "", ms
         except Exception as e:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
             ms = int((time.time() - start) * 1000)
             return None, f"{type(e).__name__}: {e}", ms
 
