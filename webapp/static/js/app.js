@@ -61,7 +61,7 @@ function setLoginPrompt(meta, onics) {
     return;
   }
   if (onics?.login_required) {
-    const sshUser = "pi";
+    const sshUser = meta.ssh_user || "pi";
     const sshCommand = `ssh -p ${meta.ssh_port} ${sshUser}@${meta.hostname}`;
     const sshUri = `ssh://${sshUser}@${meta.hostname}:${meta.ssh_port}`;
     const sshSetupCommand = `ssh-copy-id -p ${meta.ssh_port} ${sshUser}@${meta.hostname}`;
