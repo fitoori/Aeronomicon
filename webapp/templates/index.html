@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }} Remote Console</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+    <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+  </head>
+  <body>
+    <div class="loading-screen" id="loading-screen" aria-live="polite">
+      <img
+        src="{{ url_for('static', filename='img/onics-seal.svg') }}"
+        alt="Wireless Autonomous Terrestrial Navigation Experiment seal"
+        class="loading-logo"
+      />
+      <div class="loading-text">
+        <div class="loading-title">Booting ONICS-T Console</div>
+        <div class="loading-subtitle">Synchronizing tailnet telemetry...</div>
+      </div>
+    </div>
+
+    <main class="shell" aria-live="polite">
+      <header class="shell__header">
+        <div>
+          <p class="shell__eyebrow">Remote Console</p>
+          <h1 class="shell__title" id="app-title">{{ title }}</h1>
+          <p class="shell__meta" id="app-meta">Awaiting link...</p>
+        </div>
+        <div class="shell__status" id="connection-pill">LINK: INIT</div>
+      </header>
+
+      <section class="grid">
+        <article class="panel">
+          <header class="panel__header">
+            <h2>Command Deck</h2>
+            <p>Send guarded engage/disengage commands.</p>
+          </header>
+          <div class="panel__body">
+            <div class="button-row">
+              <button class="btn btn--engage" id="engage-btn">ENGAGE</button>
+              <button class="btn btn--disengage" id="disengage-btn">DISENGAGE</button>
+            </div>
+            <div class="button-row button-row--secondary">
+              <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
+            </div>
+            <div class="status-strip" id="onics-state">
+              <span class="status-strip__label">State</span>
+              <strong class="status-strip__value">IDLE</strong>
+              <span class="status-strip__meta" id="onics-runtime">No runtime telemetry.</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <header class="panel__header">
+            <h2>Tailnet Health</h2>
+            <p>MagicDNS + SSH readiness.</p>
+          </header>
+          <div class="panel__body" id="health-panel">
+            <div class="health-grid">
+              <div class="health-card" id="tailscale-card">
+                <h3>Tailscale</h3>
+                <p class="health-card__value" id="tailscale-status">UNKNOWN</p>
+                <p class="health-card__meta" id="tailscale-meta">Awaiting signal.</p>
+              </div>
+              <div class="health-card" id="dns-card">
+                <h3>MagicDNS</h3>
+                <p class="health-card__value" id="dns-status">UNKNOWN</p>
+                <p class="health-card__meta" id="dns-meta">Awaiting DNS resolution.</p>
+              </div>
+              <div class="health-card" id="tcp-card">
+                <h3>SSH Probe</h3>
+                <p class="health-card__value" id="tcp-status">UNKNOWN</p>
+                <p class="health-card__meta" id="tcp-meta">Awaiting TCP telemetry.</p>
+              </div>
+              <div class="health-card" id="stale-card">
+                <h3>Staleness</h3>
+                <p class="health-card__value" id="stale-status">OK</p>
+                <p class="health-card__meta" id="stale-meta">No signal loss.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel panel--full">
+          <header class="panel__header">
+            <h2>Telemetry Log</h2>
+            <p>Live stdout/stderr stream (most recent first).</p>
+          </header>
+          <div class="panel__body panel__body--logs">
+            <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
