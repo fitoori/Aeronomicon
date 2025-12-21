@@ -938,9 +938,18 @@ def _health_loop(stop_evt: threading.Event) -> None:
 def _install_signal_handlers(
     stop_evt: threading.Event, shutdown_server: Callable[[], None]
 ) -> None:
+    shutdown_started = threading.Event()
+
     def _handler(signum: int, _frame: Any) -> None:
         stop_evt.set()
-        shutdown_server()
+        if shutdown_started.is_set():
+            return
+        shutdown_started.set()
+        threading.Thread(
+            target=shutdown_server,
+            name=f"shutdown-signal-{signum}",
+            daemon=True,
+        ).start()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
