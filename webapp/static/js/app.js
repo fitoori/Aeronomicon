@@ -11,6 +11,7 @@ const loginModal = document.getElementById("login-modal");
 const loginMessage = document.getElementById("login-message");
 const loginCommand = document.getElementById("login-command");
 const loginSetupCommand = document.getElementById("login-setup-command");
+const loginKeygenCommand = document.getElementById("login-keygen-command");
 const loginOpenBtn = document.getElementById("login-open-btn");
 const loginDismissBtn = document.getElementById("login-dismiss-btn");
 
@@ -49,7 +50,14 @@ function formatAge(value) {
 }
 
 function setLoginPrompt(meta, onics) {
-  if (!loginModal || !loginMessage || !loginCommand || !loginSetupCommand || !loginOpenBtn) {
+  if (
+    !loginModal ||
+    !loginMessage ||
+    !loginCommand ||
+    !loginSetupCommand ||
+    !loginKeygenCommand ||
+    !loginOpenBtn
+  ) {
     return;
   }
   if (onics?.login_required) {
@@ -57,11 +65,13 @@ function setLoginPrompt(meta, onics) {
     const sshCommand = `ssh -p ${meta.ssh_port} ${sshUser}@${meta.hostname}`;
     const sshUri = `ssh://${sshUser}@${meta.hostname}:${meta.ssh_port}`;
     const sshSetupCommand = `ssh-copy-id -p ${meta.ssh_port} ${sshUser}@${meta.hostname}`;
+    const sshKeygenCommand = 'ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""';
     loginMessage.textContent =
       onics.login_message ||
       "SSH authentication is missing. Complete an interactive login to continue.";
     loginCommand.textContent = sshCommand;
     loginSetupCommand.textContent = sshSetupCommand;
+    loginKeygenCommand.textContent = sshKeygenCommand;
     loginOpenBtn.onclick = () => {
       window.location.href = sshUri;
     };

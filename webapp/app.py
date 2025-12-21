@@ -287,6 +287,11 @@ class OnicsController:
         lowered = err.lower()
         return "no authentication methods available" in lowered or "authentication failed" in lowered
 
+    @staticmethod
+    def _needs_keygen_prompt(err: str) -> bool:
+        lowered = err.lower()
+        return "no identities found" in lowered
+
     def _set_login_prompt(self, required: bool, message: str = "") -> None:
         with self._lock:
             self._runtime.login_required = required
@@ -299,6 +304,13 @@ class OnicsController:
                 "SSH authentication not found. Run `ssh-copy-id -p 22 pi@watne.tail8d99b6.ts.net` "
                 "to set up your key, then open `ssh -p 22 pi@watne.tail8d99b6.ts.net` to continue."
             )
+            if self._needs_keygen_prompt(err):
+                msg = (
+                    "No SSH identities found. Generate one with "
+                    "`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N \"\"`, "
+                    "then run `ssh-copy-id -p 22 pi@watne.tail8d99b6.ts.net` and "
+                    "`ssh -p 22 pi@watne.tail8d99b6.ts.net` to continue."
+                )
             self._set_login_prompt(True, msg)
             self._append_log("SSH AUTH REQUIRED: interactive login needed to continue.")
         else:
