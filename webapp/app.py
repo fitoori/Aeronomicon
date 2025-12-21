@@ -296,8 +296,8 @@ class OnicsController:
     def _handle_ssh_failure(self, err: str) -> None:
         if self._needs_login_prompt(err):
             msg = (
-                "SSH authentication not found. Open an interactive SSH login to authorize your key or "
-                "enter credentials."
+                "SSH authentication not found. Run `ssh-copy-id -p 22 pi@watne.tail8d99b6.ts.net` "
+                "to set up your key, then open `ssh -p 22 pi@watne.tail8d99b6.ts.net` to continue."
             )
             self._set_login_prompt(True, msg)
             self._append_log("SSH AUTH REQUIRED: interactive login needed to continue.")

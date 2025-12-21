@@ -10,6 +10,7 @@ const onicsRuntime = document.getElementById("onics-runtime");
 const loginModal = document.getElementById("login-modal");
 const loginMessage = document.getElementById("login-message");
 const loginCommand = document.getElementById("login-command");
+const loginSetupCommand = document.getElementById("login-setup-command");
 const loginOpenBtn = document.getElementById("login-open-btn");
 const loginDismissBtn = document.getElementById("login-dismiss-btn");
 
@@ -48,16 +49,19 @@ function formatAge(value) {
 }
 
 function setLoginPrompt(meta, onics) {
-  if (!loginModal || !loginMessage || !loginCommand || !loginOpenBtn) {
+  if (!loginModal || !loginMessage || !loginCommand || !loginSetupCommand || !loginOpenBtn) {
     return;
   }
   if (onics?.login_required) {
-    const sshCommand = `ssh -p ${meta.ssh_port} ${meta.ssh_user}@${meta.hostname}`;
-    const sshUri = `ssh://${meta.ssh_user}@${meta.hostname}:${meta.ssh_port}`;
+    const sshUser = "pi";
+    const sshCommand = `ssh -p ${meta.ssh_port} ${sshUser}@${meta.hostname}`;
+    const sshUri = `ssh://${sshUser}@${meta.hostname}:${meta.ssh_port}`;
+    const sshSetupCommand = `ssh-copy-id -p ${meta.ssh_port} ${sshUser}@${meta.hostname}`;
     loginMessage.textContent =
       onics.login_message ||
       "SSH authentication is missing. Complete an interactive login to continue.";
     loginCommand.textContent = sshCommand;
+    loginSetupCommand.textContent = sshSetupCommand;
     loginOpenBtn.onclick = () => {
       window.location.href = sshUri;
     };
