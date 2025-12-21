@@ -47,10 +47,17 @@
 
     <main class="shell" aria-live="polite">
       <header class="shell__header">
-        <div>
-          <p class="shell__eyebrow">Remote Console</p>
-          <h1 class="shell__title" id="app-title">{{ title }}</h1>
-          <p class="shell__meta" id="app-meta">Awaiting link...</p>
+        <div class="shell__brand">
+          <img
+            src="{{ url_for('static', filename='img/onics-seal.svg') }}"
+            alt="ONICS seal"
+            class="shell__logo"
+          />
+          <div class="shell__brand-text">
+            <p class="shell__eyebrow">Remote Console</p>
+            <h1 class="shell__title" id="app-title">{{ title }}</h1>
+            <p class="shell__meta" id="app-meta">Awaiting link...</p>
+          </div>
         </div>
         <div class="shell__status" id="connection-pill">LINK: INIT</div>
       </header>
