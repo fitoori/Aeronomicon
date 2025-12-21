@@ -79,7 +79,7 @@ TAILNET_HOSTNAME = (TAILNET_HOSTNAME_ENV or TAILNET_HOSTNAME_DEFAULT).strip()
 SSH_PORT_ENV = os.environ.get("WATNE_SSH_PORT")
 SSH_PORT = int(SSH_PORT_ENV or "22")
 SSH_USER_ENV = os.environ.get("WATNE_SSH_USER")
-SSH_USER = (SSH_USER_ENV or getpass.getuser()).strip()
+SSH_USER = (SSH_USER_ENV or "pi").strip()
 SSH_CONFIG_PATH = os.path.expanduser(os.environ.get("WATNE_SSH_CONFIG", "~/.ssh/config"))
 
 # Remote script path (as provided)
