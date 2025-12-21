@@ -230,6 +230,8 @@ class OnicsRuntime:
     remote_pid: Optional[int] = None
     remote_pidfile: str = REMOTE_PIDFILE
     last_error: str = ""
+    login_required: bool = False
+    login_message: str = ""
 
 
 # ---- ONICS-T controller ------------------------------------------------------
@@ -278,6 +280,28 @@ class OnicsController:
             if error:
                 self._runtime.last_error = error
         self._broker.publish("state", self.snapshot())
+
+    @staticmethod
+    def _needs_login_prompt(err: str) -> bool:
+        lowered = err.lower()
+        return "no authentication methods available" in lowered or "authentication failed" in lowered
+
+    def _set_login_prompt(self, required: bool, message: str = "") -> None:
+        with self._lock:
+            self._runtime.login_required = required
+            self._runtime.login_message = message if required else ""
+        self._broker.publish("state", self.snapshot())
+
+    def _handle_ssh_failure(self, err: str) -> None:
+        if self._needs_login_prompt(err):
+            msg = (
+                "SSH authentication not found. Open an interactive SSH login to authorize your key or "
+                "enter credentials."
+            )
+            self._set_login_prompt(True, msg)
+            self._append_log("SSH AUTH REQUIRED: interactive login needed to continue.")
+        else:
+            self._set_login_prompt(False, "")
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
@@ -568,6 +592,8 @@ class OnicsController:
             self._runtime.running_since_mono = 0.0
             self._runtime.last_output_mono = 0.0
             self._runtime.last_ssh_ok_mono = 0.0
+            self._runtime.login_required = False
+            self._runtime.login_message = ""
 
         self._set_state("STARTING")
         t = threading.Thread(target=self._remote_run_thread, name="onics-ssh-reader", daemon=True)
@@ -601,6 +627,7 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
+                self._handle_ssh_failure(err)
                 self._append_log(f"STOP FAILED: SSH connect error: {err}")
                 self._set_state("LOS", f"STOP SSH connect failed: {err}")
                 return False, err
@@ -675,6 +702,7 @@ class OnicsController:
         client, err, ms = self._ssh_connect()
         if client is None:
             self._mark_failure()
+            self._handle_ssh_failure(err)
             self._append_log(f"SSH CONNECT FAILED ({ms} ms): {err}")
             self._set_state("LOS", f"SSH connect failed: {err}")
             return
@@ -696,6 +724,7 @@ class OnicsController:
             self._runtime.running_since_mono = monotonic_s()
 
         self._append_log(f"SSH CONNECTED: {SSH_USER}@{TAILNET_HOSTNAME}:{SSH_PORT} ({ms} ms)")
+        self._set_login_prompt(False, "")
 
         # Remote preflight: ensure python3 and script exist.
         preflight_cmd = (

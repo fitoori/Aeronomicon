@@ -7,6 +7,11 @@ const connectionPill = document.getElementById("connection-pill");
 const appMeta = document.getElementById("app-meta");
 const onicsState = document.querySelector("#onics-state .status-strip__value");
 const onicsRuntime = document.getElementById("onics-runtime");
+const loginModal = document.getElementById("login-modal");
+const loginMessage = document.getElementById("login-message");
+const loginCommand = document.getElementById("login-command");
+const loginOpenBtn = document.getElementById("login-open-btn");
+const loginDismissBtn = document.getElementById("login-dismiss-btn");
 
 const tailscaleStatus = document.getElementById("tailscale-status");
 const tailscaleMeta = document.getElementById("tailscale-meta");
@@ -42,6 +47,28 @@ function formatAge(value) {
   return `${value.toFixed(1)}s`;
 }
 
+function setLoginPrompt(meta, onics) {
+  if (!loginModal || !loginMessage || !loginCommand || !loginOpenBtn) {
+    return;
+  }
+  if (onics?.login_required) {
+    const sshCommand = `ssh -p ${meta.ssh_port} ${meta.ssh_user}@${meta.hostname}`;
+    const sshUri = `ssh://${meta.ssh_user}@${meta.hostname}:${meta.ssh_port}`;
+    loginMessage.textContent =
+      onics.login_message ||
+      "SSH authentication is missing. Complete an interactive login to continue.";
+    loginCommand.textContent = sshCommand;
+    loginOpenBtn.onclick = () => {
+      window.location.href = sshUri;
+    };
+    loginModal.classList.add("is-visible");
+    loginModal.setAttribute("aria-hidden", "false");
+  } else {
+    loginModal.classList.remove("is-visible");
+    loginModal.setAttribute("aria-hidden", "true");
+  }
+}
+
 function updateSnapshot(snapshot) {
   if (!snapshot) {
     return;
@@ -55,6 +82,7 @@ function updateSnapshot(snapshot) {
   const { meta, health, onics } = snapshot;
   const metaLine = `${meta.hostname} · ${meta.ssh_user}@${meta.hostname}:${meta.ssh_port}`;
   appMeta.textContent = metaLine;
+  setLoginPrompt(meta, onics);
 
   connectionPill.textContent = health.los
     ? "LINK: LOS"
@@ -165,6 +193,11 @@ clearBtn?.addEventListener("click", async () => {
   } finally {
     clearBtn.disabled = false;
   }
+});
+
+loginDismissBtn?.addEventListener("click", () => {
+  loginModal?.classList.remove("is-visible");
+  loginModal?.setAttribute("aria-hidden", "true");
 });
 
 const eventSource = new EventSource("/stream");

@@ -20,6 +20,23 @@
       </div>
     </div>
 
+    <div class="modal" id="login-modal" aria-hidden="true">
+      <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="login-title">
+        <h2 id="login-title">SSH Login Required</h2>
+        <p class="modal__message" id="login-message">
+          SSH authentication is missing. Complete an interactive login to continue.
+        </p>
+        <div class="modal__command">
+          <span>Command</span>
+          <code id="login-command">ssh user@host</code>
+        </div>
+        <div class="button-row">
+          <button class="btn btn--engage" id="login-open-btn">Open SSH Login</button>
+          <button class="btn btn--ghost" id="login-dismiss-btn">Dismiss</button>
+        </div>
+      </div>
+    </div>
+
     <main class="shell" aria-live="polite">
       <header class="shell__header">
         <div>
