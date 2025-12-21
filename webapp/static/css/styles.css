@@ -296,6 +296,70 @@ body {
   color: var(--muted);
 }
 
+.modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 9, 15, 0.72);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 1000;
+}
+
+.modal.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal__panel {
+  width: min(520px, 92vw);
+  background: #0f172a;
+  border-radius: 18px;
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  padding: 24px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal__panel h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.modal__message {
+  margin: 0;
+  color: var(--muted);
+}
+
+.modal__command {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.modal__command span {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.modal__command code {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  color: #bae6fd;
+  word-break: break-all;
+}
+
 @keyframes pulse {
   0% {
     transform: scale(0.98);
