@@ -42,7 +42,7 @@ import threading
 import time
 import traceback
 from collections import deque
-from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple
 
 # ---- Dependency preflight (fail fast, with actionable errors) -----------------
 
@@ -50,6 +50,7 @@ _missing: List[str] = []
 
 try:
     from flask import Flask, Response, jsonify, render_template
+    from werkzeug.serving import make_server
 except Exception:  # pragma: no cover
     _missing.append("flask")
 
@@ -934,9 +935,12 @@ def _health_loop(stop_evt: threading.Event) -> None:
         stop_evt.wait(timeout=sleep_s)
 
 
-def _install_signal_handlers(stop_evt: threading.Event) -> None:
+def _install_signal_handlers(
+    stop_evt: threading.Event, shutdown_server: Callable[[], None]
+) -> None:
     def _handler(signum: int, _frame: Any) -> None:
         stop_evt.set()
+        shutdown_server()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -953,14 +957,18 @@ def main() -> int:
         )
 
     stop_evt = threading.Event()
-    _install_signal_handlers(stop_evt)
 
     t = threading.Thread(target=_health_loop, args=(stop_evt,), name="health-loop", daemon=True)
     t.start()
 
-    # Run Flask (threaded to support SSE).
-    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=False, threaded=True)
-    stop_evt.set()
+    # Run Flask with a shutdown handle for clean SIGTERM/SIGINT exits.
+    server = make_server(FLASK_HOST, FLASK_PORT, app, threaded=True)
+    _install_signal_handlers(stop_evt, server.shutdown)
+    try:
+        server.serve_forever()
+    finally:
+        stop_evt.set()
+        server.server_close()
     return 0
 
 
