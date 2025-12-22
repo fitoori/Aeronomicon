@@ -34,6 +34,14 @@ const mavproxyStatus = document.getElementById("mavproxy-status");
 const mavproxyMeta = document.getElementById("mavproxy-meta");
 const uplinkStatus = document.getElementById("uplink-status");
 const uplinkMeta = document.getElementById("uplink-meta");
+const systemLoad = document.getElementById("system-load");
+const systemLoadMeta = document.getElementById("system-load-meta");
+const systemMemory = document.getElementById("system-memory");
+const systemMemoryMeta = document.getElementById("system-memory-meta");
+const systemDisk = document.getElementById("system-disk");
+const systemDiskMeta = document.getElementById("system-disk-meta");
+const systemUptime = document.getElementById("system-uptime");
+const systemUptimeMeta = document.getElementById("system-uptime-meta");
 
 const cards = {
   tailscale: document.getElementById("tailscale-card"),
@@ -42,6 +50,13 @@ const cards = {
   tracking: document.getElementById("tracking-card"),
   startup: document.getElementById("startup-card"),
   autopilot: document.getElementById("autopilot-card"),
+  arducopter: document.getElementById("arducopter-card"),
+  mavproxy: document.getElementById("mavproxy-card"),
+  uplink: document.getElementById("uplink-card"),
+  systemLoad: document.getElementById("system-load-card"),
+  systemMemory: document.getElementById("system-memory-card"),
+  systemDisk: document.getElementById("system-disk-card"),
+  systemUptime: document.getElementById("system-uptime-card"),
 };
 
 function setCardState(card, state) {
@@ -58,11 +73,78 @@ function setCardState(card, state) {
   }
 }
 
+function pulseCard(card) {
+  if (!card) {
+    return;
+  }
+  card.classList.remove("health-card--pulse");
+  void card.offsetWidth;
+  card.classList.add("health-card--pulse");
+}
+
 function formatAge(value) {
   if (value === null || value === undefined) {
     return "n/a";
   }
   return `${value.toFixed(1)}s`;
+}
+
+function formatServiceStatus(status) {
+  if (!status) {
+    return "UNKNOWN";
+  }
+  return String(status).toUpperCase();
+}
+
+function serviceStateToCard(status) {
+  if (!status) {
+    return null;
+  }
+  const normalized = String(status).toLowerCase();
+  if (normalized === "active") {
+    return "ok";
+  }
+  if (["activating", "reloading", "deactivating"].includes(normalized)) {
+    return "warn";
+  }
+  if (["failed", "inactive"].includes(normalized)) {
+    return "danger";
+  }
+  if (["missing", "unknown"].includes(normalized)) {
+    return "warn";
+  }
+  return null;
+}
+
+function formatBytes(value) {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let idx = 0;
+  let num = value;
+  while (num >= 1024 && idx < units.length - 1) {
+    num /= 1024;
+    idx += 1;
+  }
+  return `${num.toFixed(num >= 100 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function formatUptime(seconds) {
+  if (seconds === null || seconds === undefined) {
+    return "n/a";
+  }
+  const total = Math.floor(seconds);
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  if (days > 0) {
+    return `${days}d ${hours}h ${mins}m`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${mins}m`;
+  }
+  return `${mins}m`;
 }
 
 const telemetryState = {
@@ -136,17 +218,22 @@ function parseLogTimestamp(line) {
 function parseTelemetry(line) {
   const cleaned = line.replace(/^\[[^\]]+\]\s*/, "").trim();
   const timestamp = parseLogTimestamp(line);
+  let trackingUpdated = false;
+  let startupUpdated = false;
+  let autopilotUpdated = false;
 
   const trackingMatch = cleaned.match(/Tracking confidence:\s*(.+)$/i);
   if (trackingMatch) {
     telemetryState.trackingConfidence = trackingMatch[1].trim();
     telemetryState.trackingTimestamp = timestamp;
+    trackingUpdated = true;
   }
 
   for (const stage of startupStages) {
     if (stage.regex.test(cleaned)) {
       telemetryState.startupStage = stage.label;
       telemetryState.startupTimestamp = timestamp;
+      startupUpdated = true;
       break;
     }
   }
@@ -156,9 +243,20 @@ function parseTelemetry(line) {
     telemetryState.autopilotLevel = autopilotMatch[1].trim();
     telemetryState.autopilotMessage = autopilotMatch[2].trim();
     telemetryState.autopilotTimestamp = timestamp;
+    autopilotUpdated = true;
   }
 
   updateTelemetryCards();
+
+  if (trackingUpdated) {
+    pulseCard(cards.tracking);
+  }
+  if (startupUpdated) {
+    pulseCard(cards.startup);
+  }
+  if (autopilotUpdated) {
+    pulseCard(cards.autopilot);
+  }
 }
 
 function setLoginPrompt(meta, onics) {
@@ -205,7 +303,7 @@ function updateSnapshot(snapshot) {
     setTimeout(() => loadingScreen.remove(), 600);
   }
 
-  const { meta, health, onics } = snapshot;
+  const { meta, health, onics, autopilot } = snapshot;
   const metaLine = `${meta.hostname} · ${meta.ssh_user}@${meta.hostname}:${meta.ssh_port}`;
   appMeta.textContent = metaLine;
   setLoginPrompt(meta, onics);
@@ -240,21 +338,24 @@ function updateSnapshot(snapshot) {
   tailscaleStatus.textContent = health.tailscale_ok ? "RUNNING" : "OFFLINE";
   tailscaleMeta.textContent = health.tailscale_error || health.tailscale_backend_state;
   setCardState(cards.tailscale, health.tailscale_ok ? "ok" : "danger");
+  pulseCard(cards.tailscale);
 
   dnsStatus.textContent = health.dns_ok ? "RESOLVED" : "UNRESOLVED";
   dnsMeta.textContent = health.dns_ok
     ? `IPs: ${health.dns_ips.join(", ")}`
     : health.dns_error || "Awaiting DNS";
   setCardState(cards.dns, health.dns_ok ? "ok" : "warn");
+  pulseCard(cards.dns);
 
   tcpStatus.textContent = health.tcp_ok ? "CONNECTED" : "BLOCKED";
   tcpMeta.textContent = health.tcp_ok
     ? `Probe ${health.tcp_ip}:${meta.ssh_port} ok`
     : health.tcp_error || "Awaiting TCP";
   setCardState(cards.tcp, health.tcp_ok ? "ok" : "danger");
+  pulseCard(cards.tcp);
 
-  if (snapshot.autopilot && snapshot.autopilot.services) {
-    const services = snapshot.autopilot.services;
+  if (autopilot && autopilot.services) {
+    const services = autopilot.services;
     const arducopter = services.arducopter || {};
     const mavproxy = services.mavproxy || {};
     const uplink = services.uplink || {};
@@ -262,14 +363,75 @@ function updateSnapshot(snapshot) {
     arducopterStatus.textContent = formatServiceStatus(arducopter.status);
     arducopterMeta.textContent = arducopter.detail || "Awaiting status.";
     setCardState(cards.arducopter, serviceStateToCard(arducopter.status));
+    pulseCard(cards.arducopter);
 
     mavproxyStatus.textContent = formatServiceStatus(mavproxy.status);
     mavproxyMeta.textContent = mavproxy.detail || "Awaiting status.";
     setCardState(cards.mavproxy, serviceStateToCard(mavproxy.status));
+    pulseCard(cards.mavproxy);
 
     uplinkStatus.textContent = formatServiceStatus(uplink.status);
     uplinkMeta.textContent = uplink.detail || "Awaiting status.";
     setCardState(cards.uplink, serviceStateToCard(uplink.status));
+    pulseCard(cards.uplink);
+  }
+
+  if (autopilot && autopilot.system) {
+    const system = autopilot.system;
+    if (systemLoad) {
+      if (system.load_1 !== null && system.load_5 !== null && system.load_15 !== null) {
+        systemLoad.textContent = `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(
+          2
+        )}`;
+      } else {
+        systemLoad.textContent = "n/a";
+      }
+      systemLoadMeta.textContent =
+        system.cpu_count !== null && system.cpu_count !== undefined
+        ? `CPU cores: ${system.cpu_count}`
+        : "CPU core count unavailable.";
+      pulseCard(cards.systemLoad);
+    }
+
+    if (systemMemory) {
+      if (system.mem_total_bytes !== null && system.mem_total_bytes !== undefined) {
+        const used = system.mem_used_bytes ?? 0;
+        systemMemory.textContent = `${formatBytes(used)} / ${formatBytes(system.mem_total_bytes)}`;
+        systemMemoryMeta.textContent =
+          system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
+          ? `Available ${formatBytes(system.mem_available_bytes)}`
+          : "Memory availability unknown.";
+      } else {
+        systemMemory.textContent = "n/a";
+        systemMemoryMeta.textContent = "Memory telemetry unavailable.";
+      }
+      pulseCard(cards.systemMemory);
+    }
+
+    if (systemDisk) {
+      if (system.disk_total_bytes !== null && system.disk_total_bytes !== undefined) {
+        systemDisk.textContent = `${formatBytes(system.disk_used_bytes ?? 0)} / ${formatBytes(
+          system.disk_total_bytes
+        )}`;
+        systemDiskMeta.textContent =
+          system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
+          ? `Free ${formatBytes(system.disk_free_bytes)}`
+          : "Disk availability unknown.";
+      } else {
+        systemDisk.textContent = "n/a";
+        systemDiskMeta.textContent = "Disk telemetry unavailable.";
+      }
+      pulseCard(cards.systemDisk);
+    }
+
+    if (systemUptime) {
+      systemUptime.textContent = formatUptime(system.uptime_s);
+      systemUptimeMeta.textContent =
+        system.uptime_s !== null && system.uptime_s !== undefined
+        ? `Booted ${formatUptime(system.uptime_s)} ago`
+        : "Uptime telemetry unavailable.";
+      pulseCard(cards.systemUptime);
+    }
   }
 
   const canEngage = onics.state === "IDLE" || onics.state === "ERROR" || onics.state === "LOS";

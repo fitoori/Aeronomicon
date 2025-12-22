@@ -263,6 +263,7 @@ class OnicsRuntime:
 @dataclasses.dataclass
 class AutopilotHealth:
     services: Dict[str, Dict[str, Any]] = dataclasses.field(default_factory=dict)
+    system: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 # ---- ONICS-T controller ------------------------------------------------------
@@ -295,7 +296,8 @@ class OnicsController:
                     "detail": "Awaiting status.",
                     "active": False,
                 },
-            }
+            },
+            system={},
         )
         self._stop_requested = False
         self._ssh: Optional[paramiko.SSHClient] = None
@@ -407,6 +409,7 @@ class OnicsController:
             hl = dataclasses.asdict(self._health)
             ap = dataclasses.asdict(self._autopilot)
             logs = list(self._logs)[-MAX_LOG_LINES:]
+        ap["system"] = self._system_stats()
         # Derived ages (computed server-side)
         now_m = monotonic_s()
         rt["state_age_s"] = round(max(0.0, now_m - rt.get("last_state_change_mono", 0.0)), 3)
@@ -449,6 +452,66 @@ class OnicsController:
         self._fail_events_60s.append(now_m)
         while self._fail_events_60s and (now_m - self._fail_events_60s[0]) > 60.0:
             self._fail_events_60s.popleft()
+
+    @staticmethod
+    def _system_stats() -> Dict[str, Any]:
+        stats: Dict[str, Any] = {
+            "load_1": None,
+            "load_5": None,
+            "load_15": None,
+            "cpu_count": os.cpu_count() or 0,
+            "uptime_s": None,
+            "mem_total_bytes": None,
+            "mem_available_bytes": None,
+            "mem_used_bytes": None,
+            "disk_total_bytes": None,
+            "disk_used_bytes": None,
+            "disk_free_bytes": None,
+        }
+
+        try:
+            load_1, load_5, load_15 = os.getloadavg()
+            stats["load_1"] = load_1
+            stats["load_5"] = load_5
+            stats["load_15"] = load_15
+        except (AttributeError, OSError):
+            pass
+
+        try:
+            with open("/proc/uptime", "r", encoding="utf-8") as uptime_file:
+                uptime = uptime_file.read().strip().split()
+                if uptime:
+                    stats["uptime_s"] = float(uptime[0])
+        except (OSError, ValueError):
+            pass
+
+        mem_total = None
+        mem_available = None
+        try:
+            with open("/proc/meminfo", "r", encoding="utf-8") as meminfo:
+                for line in meminfo:
+                    if line.startswith("MemTotal:"):
+                        mem_total = int(line.split()[1]) * 1024
+                    elif line.startswith("MemAvailable:"):
+                        mem_available = int(line.split()[1]) * 1024
+            if mem_total is not None:
+                stats["mem_total_bytes"] = mem_total
+            if mem_available is not None:
+                stats["mem_available_bytes"] = mem_available
+            if mem_total is not None and mem_available is not None:
+                stats["mem_used_bytes"] = max(mem_total - mem_available, 0)
+        except (OSError, ValueError):
+            pass
+
+        try:
+            disk = shutil.disk_usage("/")
+            stats["disk_total_bytes"] = disk.total
+            stats["disk_used_bytes"] = disk.used
+            stats["disk_free_bytes"] = disk.free
+        except OSError:
+            pass
+
+        return stats
 
     def _tailscale_check(self) -> None:
         exe = which_or_none("tailscale")
