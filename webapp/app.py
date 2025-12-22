@@ -258,6 +258,7 @@ class OnicsRuntime:
     login_required: bool = False
     login_message: str = ""
     engaged: bool = False
+    restart_failures: int = 0
 
 
 @dataclasses.dataclass
@@ -796,6 +797,7 @@ class OnicsController:
             self._runtime.login_message = ""
             if not auto_restart:
                 self._restart_events.clear()
+                self._runtime.restart_failures = 0
 
         self._set_state("STARTING")
         t = threading.Thread(target=self._remote_run_thread, name="onics-ssh-reader", daemon=True)
@@ -920,6 +922,7 @@ class OnicsController:
                 return
 
             self._restart_events.append(now_m)
+            self._runtime.restart_failures += 1
 
         self._append_log(
             f"AUTO-RESTART: scheduling restart in {AUTO_RESTART_DELAY_S:.1f}s ({reason})"

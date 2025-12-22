@@ -25,6 +25,7 @@ const trackingConfidence = document.getElementById("tracking-confidence");
 const trackingMeta = document.getElementById("tracking-meta");
 const startupStage = document.getElementById("startup-stage");
 const startupMeta = document.getElementById("startup-meta");
+const startupFails = document.getElementById("startup-fails");
 const autopilotAlert = document.getElementById("autopilot-alert");
 const autopilotMeta = document.getElementById("autopilot-meta");
 
@@ -236,6 +237,12 @@ function updateSnapshot(snapshot) {
   onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
     onics.last_output_age_s
   )}`;
+  if (startupFails) {
+    const restartFails = Number.isFinite(onics.restart_failures)
+      ? onics.restart_failures
+      : 0;
+    startupFails.textContent = `Restart fails: ${restartFails}`;
+  }
 
   tailscaleStatus.textContent = health.tailscale_ok ? "RUNNING" : "OFFLINE";
   tailscaleMeta.textContent = health.tailscale_error || health.tailscale_backend_state;
