@@ -7,8 +7,8 @@
   </clipPath>
 </defs>
 
-<circle cx="500" cy="500" r="491" fill="#2E4F3A" stroke="#000000" stroke-width="18"/>
-<circle cx="500" cy="500" r="390" fill="#2E4F3A" stroke="#000000" stroke-width="12"/>
+<circle cx="500" cy="500" r="491" fill="none" stroke="#000000" stroke-width="18"/>
+<circle cx="500" cy="500" r="390" fill="none" stroke="#000000" stroke-width="12"/>
 
 <text font-family="Verdana" font-size="52" fill="#F2F2E8" stroke="#000000" stroke-width="4.5" paint-order="stroke fill">
   <textPath href="#topArc" startOffset="50%" text-anchor="middle">WIRELESS AUTONOMOUS TERRESTRIAL NAVIGATION EXPERIMENT</textPath>
