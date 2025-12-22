@@ -928,13 +928,19 @@ class OnicsController:
         ok = False
         detail = ""
         try:
-            cmd = f"systemctl restart {shlex.quote(unit)}"
-            _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
-            out = stdout.read().decode("utf-8", errors="replace")
-            err = stderr.read().decode("utf-8", errors="replace")
-            exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
-            detail = (err or out or "").strip()
-            ok = exit_status == 0
+            commands = [
+                f"sudo -n systemctl restart {shlex.quote(unit)}",
+                f"systemctl restart {shlex.quote(unit)}",
+            ]
+            for cmd in commands:
+                _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
+                out = stdout.read().decode("utf-8", errors="replace")
+                err = stderr.read().decode("utf-8", errors="replace")
+                exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+                detail = (err or out or "").strip()
+                if exit_status == 0:
+                    ok = True
+                    break
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
             ok = False
