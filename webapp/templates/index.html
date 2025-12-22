@@ -96,6 +96,36 @@
       </section>
 
       <section class="toolbar-grid">
+        <article class="panel">
+          <header class="panel__header">
+            <h2>Vehicle Telemetry</h2>
+            <p>Parsed milestones from the ONICS-T log stream.</p>
+          </header>
+          <div class="panel__body">
+            <div class="health-grid">
+              <div class="health-card" id="tracking-card">
+                <h3>Tracking Confidence</h3>
+                <p class="health-card__value" id="tracking-confidence">Awaiting telemetry</p>
+                <p class="health-card__meta" id="tracking-meta">No tracking updates yet.</p>
+              </div>
+              <div class="health-card" id="startup-card">
+                <div class="health-card__header">
+                  <h3>Startup Stage</h3>
+                  <p class="startup-fails__value" id="startup-fails">0</p>
+                </div>
+                <p class="health-card__value" id="startup-stage">Awaiting telemetry</p>
+                <p class="health-card__meta" id="startup-meta">No startup milestones yet.</p>
+                <p class="health-card__meta startup-fails__label">Restart fails</p>
+              </div>
+              <div class="health-card" id="autopilot-card">
+                <h3>Autopilot Alerts</h3>
+                <p class="health-card__value" id="autopilot-alert">Awaiting telemetry</p>
+                <p class="health-card__meta" id="autopilot-meta">No autopilot alerts yet.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
         <article class="toolbar" id="health-panel">
           <div class="toolbar__header">
             <h2>Tailnet Health</h2>
@@ -163,36 +193,6 @@
                 <h3>Uptime</h3>
                 <p class="health-card__value" id="system-uptime">-</p>
                 <p class="health-card__meta" id="system-uptime-meta">Awaiting telemetry.</p>
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel">
-          <header class="panel__header">
-            <h2>Vehicle Telemetry</h2>
-            <p>Parsed milestones from the ONICS-T log stream.</p>
-          </header>
-          <div class="panel__body">
-            <div class="health-grid">
-              <div class="health-card" id="tracking-card">
-                <h3>Tracking Confidence</h3>
-                <p class="health-card__value" id="tracking-confidence">Awaiting telemetry</p>
-                <p class="health-card__meta" id="tracking-meta">No tracking updates yet.</p>
-              </div>
-              <div class="health-card" id="startup-card">
-                <div class="health-card__header">
-                  <h3>Startup Stage</h3>
-                  <p class="startup-fails__value" id="startup-fails">0</p>
-                </div>
-                <p class="health-card__value" id="startup-stage">Awaiting telemetry</p>
-                <p class="health-card__meta" id="startup-meta">No startup milestones yet.</p>
-                <p class="health-card__meta startup-fails__label">Restart fails</p>
-              </div>
-              <div class="health-card" id="autopilot-card">
-                <h3>Autopilot Alerts</h3>
-                <p class="health-card__value" id="autopilot-alert">Awaiting telemetry</p>
-                <p class="health-card__meta" id="autopilot-meta">No autopilot alerts yet.</p>
               </div>
             </div>
           </div>
