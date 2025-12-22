@@ -21,8 +21,6 @@ const dnsStatus = document.getElementById("dns-status");
 const dnsMeta = document.getElementById("dns-meta");
 const tcpStatus = document.getElementById("tcp-status");
 const tcpMeta = document.getElementById("tcp-meta");
-const staleStatus = document.getElementById("stale-status");
-const staleMeta = document.getElementById("stale-meta");
 const trackingConfidence = document.getElementById("tracking-confidence");
 const trackingMeta = document.getElementById("tracking-meta");
 const startupStage = document.getElementById("startup-stage");
@@ -41,7 +39,6 @@ const cards = {
   tailscale: document.getElementById("tailscale-card"),
   dns: document.getElementById("dns-card"),
   tcp: document.getElementById("tcp-card"),
-  stale: document.getElementById("stale-card"),
   tracking: document.getElementById("tracking-card"),
   startup: document.getElementById("startup-card"),
   autopilot: document.getElementById("autopilot-card"),
@@ -213,19 +210,25 @@ function updateSnapshot(snapshot) {
   appMeta.textContent = metaLine;
   setLoginPrompt(meta, onics);
 
+  const linkDegraded =
+    health.los ||
+    health.stale ||
+    !health.tailscale_ok ||
+    !health.dns_ok ||
+    !health.tcp_ok;
   connectionPill.textContent = health.los
     ? "LINK: LOS"
-    : health.stale
+    : linkDegraded
       ? "LINK: DEGRADED"
       : "LINK: OK";
   connectionPill.style.borderColor = health.los
     ? "rgba(249,115,22,0.6)"
-    : health.stale
+    : linkDegraded
       ? "rgba(245,158,11,0.6)"
       : "rgba(74,222,128,0.5)";
   connectionPill.style.color = health.los
     ? "#f97316"
-    : health.stale
+    : linkDegraded
       ? "#f59e0b"
       : "#4ade80";
 
@@ -249,20 +252,6 @@ function updateSnapshot(snapshot) {
     ? `Probe ${health.tcp_ip}:${meta.ssh_port} ok`
     : health.tcp_error || "Awaiting TCP";
   setCardState(cards.tcp, health.tcp_ok ? "ok" : "danger");
-
-  if (health.los) {
-    staleStatus.textContent = "LOS";
-    staleMeta.textContent = "No ok heartbeat received.";
-    setCardState(cards.stale, "danger");
-  } else if (health.stale) {
-    staleStatus.textContent = "STALE";
-    staleMeta.textContent = `Last ok ${formatAge(health.last_ok_age_s)} ago.`;
-    setCardState(cards.stale, "warn");
-  } else {
-    staleStatus.textContent = "OK";
-    staleMeta.textContent = `Last ok ${formatAge(health.last_ok_age_s)} ago.`;
-    setCardState(cards.stale, "ok");
-  }
 
   if (snapshot.autopilot && snapshot.autopilot.services) {
     const services = snapshot.autopilot.services;
