@@ -34,6 +34,7 @@ import json
 import os
 import queue
 import shutil
+import shlex
 import signal
 import socket
 import subprocess
@@ -638,32 +639,24 @@ class OnicsController:
             self._health.tcp_ip = ip
             self._health.tcp_error = err
 
-    def _service_status(self, unit: str) -> Dict[str, Any]:
-        exe = which_or_none("systemctl")
-        if not exe:
-            return {
-                "unit": unit,
-                "status": "MISSING",
-                "detail": "systemctl not found",
-                "active": False,
-            }
-
+    def _service_status_remote(self, client: paramiko.SSHClient, unit: str) -> Dict[str, Any]:
         active_state = "UNKNOWN"
         sub_state = ""
         description = ""
         detail = ""
 
         try:
-            p = subprocess.run(
-                [exe, "show", unit, "--property=ActiveState,SubState,Description", "--no-page"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=1.2,
-                check=False,
+            cmd = (
+                "systemctl show "
+                f"{shlex.quote(unit)} "
+                "--property=ActiveState,SubState,Description --no-pager"
             )
-            if p.returncode == 0:
-                for line in (p.stdout or "").splitlines():
+            _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
+            out = stdout.read().decode("utf-8", errors="replace")
+            err = stderr.read().decode("utf-8", errors="replace")
+            exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+            if exit_status == 0:
+                for line in (out or "").splitlines():
                     key, _, value = line.partition("=")
                     if key == "ActiveState":
                         active_state = value.strip() or active_state
@@ -672,21 +665,18 @@ class OnicsController:
                     elif key == "Description":
                         description = value.strip()
             else:
-                detail = (p.stderr or p.stdout or "").strip()
+                detail = (err or out or "").strip()
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
 
         if active_state == "UNKNOWN":
             try:
-                p2 = subprocess.run(
-                    [exe, "is-active", unit],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    timeout=1.0,
-                    check=False,
-                )
-                active_state = (p2.stdout or p2.stderr or "").strip() or active_state
+                cmd = f"systemctl is-active {shlex.quote(unit)}"
+                _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
+                out = stdout.read().decode("utf-8", errors="replace")
+                err = stderr.read().decode("utf-8", errors="replace")
+                _ = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+                active_state = (out or err or "").strip() or active_state
                 if not detail:
                     detail = f"systemctl is-active: {active_state}"
             except Exception as e:
@@ -712,8 +702,38 @@ class OnicsController:
                 if entry.get("unit")
             }
 
-        for key, unit in service_units.items():
-            updates[key] = self._service_status(unit)
+        client: Optional[paramiko.SSHClient]
+        created = False
+        with self._lock:
+            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
+
+        if client is None:
+            client, err, _ms = self._ssh_connect()
+            if client is None:
+                self._mark_failure()
+                self._handle_ssh_failure(err)
+                for key, unit in service_units.items():
+                    updates[key] = {
+                        "unit": unit,
+                        "status": "UNKNOWN",
+                        "detail": f"SSH error: {err}",
+                        "active": False,
+                    }
+                with self._lock:
+                    for key, value in updates.items():
+                        self._autopilot.services[key] = value
+                return
+            created = True
+
+        try:
+            for key, unit in service_units.items():
+                updates[key] = self._service_status_remote(client, unit)
+        finally:
+            if created and client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
 
         with self._lock:
             for key, value in updates.items():
