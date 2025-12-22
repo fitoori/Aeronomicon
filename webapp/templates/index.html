@@ -122,6 +122,54 @@
 
         <article class="panel">
           <header class="panel__header">
+            <h2>Autopilot Health</h2>
+            <p>Service status and system telemetry from the flight stack host.</p>
+          </header>
+          <div class="panel__body">
+            <div class="health-grid">
+              <div class="health-card" id="arducopter-card">
+                <h3>Arducopter</h3>
+                <p class="health-card__value" id="arducopter-status">UNKNOWN</p>
+                <p class="health-card__meta" id="arducopter-meta">Awaiting status.</p>
+              </div>
+              <div class="health-card" id="mavproxy-card">
+                <h3>MAVProxy</h3>
+                <p class="health-card__value" id="mavproxy-status">UNKNOWN</p>
+                <p class="health-card__meta" id="mavproxy-meta">Awaiting status.</p>
+              </div>
+              <div class="health-card" id="uplink-card">
+                <h3>Uplink</h3>
+                <p class="health-card__value" id="uplink-status">UNKNOWN</p>
+                <p class="health-card__meta" id="uplink-meta">Awaiting status.</p>
+              </div>
+            </div>
+            <div class="health-grid">
+              <div class="health-card" id="system-load-card">
+                <h3>System Load</h3>
+                <p class="health-card__value" id="system-load">-</p>
+                <p class="health-card__meta" id="system-load-meta">Awaiting telemetry.</p>
+              </div>
+              <div class="health-card" id="system-memory-card">
+                <h3>Memory</h3>
+                <p class="health-card__value" id="system-memory">-</p>
+                <p class="health-card__meta" id="system-memory-meta">Awaiting telemetry.</p>
+              </div>
+              <div class="health-card" id="system-disk-card">
+                <h3>Disk</h3>
+                <p class="health-card__value" id="system-disk">-</p>
+                <p class="health-card__meta" id="system-disk-meta">Awaiting telemetry.</p>
+              </div>
+              <div class="health-card" id="system-uptime-card">
+                <h3>Uptime</h3>
+                <p class="health-card__value" id="system-uptime">-</p>
+                <p class="health-card__meta" id="system-uptime-meta">Awaiting telemetry.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <header class="panel__header">
             <h2>Vehicle Telemetry</h2>
             <p>Parsed milestones from the ONICS-T log stream.</p>
           </header>
