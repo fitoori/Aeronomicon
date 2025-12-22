@@ -345,21 +345,18 @@ function updateSnapshot(snapshot) {
   tailscaleStatus.textContent = health.tailscale_ok ? "RUNNING" : "OFFLINE";
   tailscaleMeta.textContent = health.tailscale_error || health.tailscale_backend_state;
   setCardState(cards.tailscale, health.tailscale_ok ? "ok" : "danger");
-  pulseCard(cards.tailscale);
 
   dnsStatus.textContent = health.dns_ok ? "RESOLVED" : "UNRESOLVED";
   dnsMeta.textContent = health.dns_ok
     ? `IPs: ${health.dns_ips.join(", ")}`
     : health.dns_error || "Awaiting DNS";
   setCardState(cards.dns, health.dns_ok ? "ok" : "warn");
-  pulseCard(cards.dns);
 
   tcpStatus.textContent = health.tcp_ok ? "CONNECTED" : "BLOCKED";
   tcpMeta.textContent = health.tcp_ok
     ? `Probe ${health.tcp_ip}:${meta.ssh_port} ok`
     : health.tcp_error || "Awaiting TCP";
   setCardState(cards.tcp, health.tcp_ok ? "ok" : "danger");
-  pulseCard(cards.tcp);
 
   if (autopilot && autopilot.services) {
     const services = autopilot.services;
@@ -370,17 +367,14 @@ function updateSnapshot(snapshot) {
     arducopterStatus.textContent = formatServiceStatus(arducopter.status);
     arducopterMeta.textContent = arducopter.detail || "Awaiting status.";
     setCardState(cards.arducopter, serviceStateToCard(arducopter.status));
-    pulseCard(cards.arducopter);
 
     mavproxyStatus.textContent = formatServiceStatus(mavproxy.status);
     mavproxyMeta.textContent = mavproxy.detail || "Awaiting status.";
     setCardState(cards.mavproxy, serviceStateToCard(mavproxy.status));
-    pulseCard(cards.mavproxy);
 
     uplinkStatus.textContent = formatServiceStatus(uplink.status);
     uplinkMeta.textContent = uplink.detail || "Awaiting status.";
     setCardState(cards.uplink, serviceStateToCard(uplink.status));
-    pulseCard(cards.uplink);
   }
 
   if (autopilot && autopilot.system) {
@@ -397,7 +391,6 @@ function updateSnapshot(snapshot) {
         system.cpu_count !== null && system.cpu_count !== undefined
         ? `CPU cores: ${system.cpu_count}`
         : "CPU core count unavailable.";
-      pulseCard(cards.systemLoad);
     }
 
     if (systemMemory) {
@@ -412,7 +405,6 @@ function updateSnapshot(snapshot) {
         systemMemory.textContent = "n/a";
         systemMemoryMeta.textContent = "Memory telemetry unavailable.";
       }
-      pulseCard(cards.systemMemory);
     }
 
     if (systemDisk) {
@@ -428,7 +420,6 @@ function updateSnapshot(snapshot) {
         systemDisk.textContent = "n/a";
         systemDiskMeta.textContent = "Disk telemetry unavailable.";
       }
-      pulseCard(cards.systemDisk);
     }
 
     if (systemUptime) {
@@ -437,7 +428,6 @@ function updateSnapshot(snapshot) {
         system.uptime_s !== null && system.uptime_s !== undefined
         ? `Booted ${formatUptime(system.uptime_s)} ago`
         : "Uptime telemetry unavailable.";
-      pulseCard(cards.systemUptime);
     }
   }
 
