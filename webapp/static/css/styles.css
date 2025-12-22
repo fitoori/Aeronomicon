@@ -51,9 +51,9 @@ body {
 .shell__logo {
   width: 56px;
   height: 56px;
-  border-radius: 14px;
-  background: rgba(9, 20, 15, 0.6);
-  padding: 6px;
+  display: block;
+  object-fit: contain;
+  object-position: center;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
 }
 
@@ -358,6 +358,9 @@ body {
 .loading-logo {
   width: 140px;
   height: 140px;
+  display: block;
+  object-fit: contain;
+  object-position: center;
   filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.45));
   animation: pulse 2.2s ease-in-out infinite;
 }
