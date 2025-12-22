@@ -212,6 +212,15 @@ body {
   color: var(--muted);
 }
 
+.btn--service {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 20, 0.7);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  color: #bbf7d0;
+}
+
 .btn:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);

@@ -14,10 +14,6 @@
         alt="Wireless Autonomous Terrestrial Navigation Experiment seal"
         class="loading-logo"
       />
-      <div class="loading-text">
-        <div class="loading-title">Booting ONICS-T Console</div>
-        <div class="loading-subtitle">Synchronizing tailnet telemetry...</div>
-      </div>
     </div>
 
     <div class="modal" id="login-modal" aria-hidden="true">
@@ -53,11 +49,7 @@
             alt="ONICS seal"
             class="shell__logo"
           />
-          <div class="shell__brand-text">
-            <p class="shell__eyebrow">Remote Console</p>
-            <h1 class="shell__title" id="app-title">{{ title }}</h1>
-            <p class="shell__meta" id="app-meta">Awaiting link...</p>
-          </div>
+          <p class="shell__meta" id="app-meta">Awaiting link...</p>
         </div>
         <div class="shell__status" id="connection-pill">LINK: INIT</div>
       </header>
@@ -70,8 +62,7 @@
           </header>
           <div class="panel__body">
             <div class="button-row">
-              <button class="btn btn--engage" id="engage-btn">ENGAGE</button>
-              <button class="btn btn--disengage" id="disengage-btn">DISENGAGE</button>
+              <button class="btn btn--engage" id="engage-toggle-btn">ENGAGE</button>
             </div>
             <div class="button-row button-row--secondary">
               <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
@@ -158,17 +149,26 @@
           <div class="panel__body">
             <div class="health-grid">
               <div class="health-card" id="arducopter-card">
-                <h3>Arducopter</h3>
+                <div class="health-card__header">
+                  <h3>Arducopter</h3>
+                  <button class="btn btn--service" data-service-restart="arducopter">Restart</button>
+                </div>
                 <p class="health-card__value" id="arducopter-status">UNKNOWN</p>
                 <p class="health-card__meta" id="arducopter-meta">Awaiting status.</p>
               </div>
               <div class="health-card" id="mavproxy-card">
-                <h3>MAVProxy</h3>
+                <div class="health-card__header">
+                  <h3>MAVProxy</h3>
+                  <button class="btn btn--service" data-service-restart="mavproxy">Restart</button>
+                </div>
                 <p class="health-card__value" id="mavproxy-status">UNKNOWN</p>
                 <p class="health-card__meta" id="mavproxy-meta">Awaiting status.</p>
               </div>
               <div class="health-card" id="uplink-card">
-                <h3>Uplink</h3>
+                <div class="health-card__header">
+                  <h3>Uplink</h3>
+                  <button class="btn btn--service" data-service-restart="uplink">Restart</button>
+                </div>
                 <p class="health-card__value" id="uplink-status">UNKNOWN</p>
                 <p class="health-card__meta" id="uplink-meta">Awaiting status.</p>
               </div>

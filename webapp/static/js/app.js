@@ -1,5 +1,4 @@
-const engageBtn = document.getElementById("engage-btn");
-const disengageBtn = document.getElementById("disengage-btn");
+const engageToggleBtn = document.getElementById("engage-toggle-btn");
 const clearBtn = document.getElementById("clear-btn");
 const logView = document.getElementById("log-view");
 const loadingScreen = document.getElementById("loading-screen");
@@ -14,6 +13,7 @@ const loginSetupCommand = document.getElementById("login-setup-command");
 const loginKeygenCommand = document.getElementById("login-keygen-command");
 const loginOpenBtn = document.getElementById("login-open-btn");
 const loginDismissBtn = document.getElementById("login-dismiss-btn");
+const serviceRestartButtons = document.querySelectorAll("[data-service-restart]");
 
 const tailscaleStatus = document.getElementById("tailscale-status");
 const tailscaleMeta = document.getElementById("tailscale-meta");
@@ -43,6 +43,8 @@ const systemDisk = document.getElementById("system-disk");
 const systemDiskMeta = document.getElementById("system-disk-meta");
 const systemUptime = document.getElementById("system-uptime");
 const systemUptimeMeta = document.getElementById("system-uptime-meta");
+
+let engageToggleAction = null;
 
 const cards = {
   tailscale: document.getElementById("tailscale-card"),
@@ -146,6 +148,36 @@ function formatUptime(seconds) {
     return `${hours}h ${mins}m`;
   }
   return `${mins}m`;
+}
+
+function updateEngageToggle(onics) {
+  if (!engageToggleBtn) {
+    return;
+  }
+  const canEngage = onics.state === "IDLE" || onics.state === "ERROR" || onics.state === "LOS";
+  const canDisengage = onics.state === "RUNNING" || onics.state === "STARTING";
+  let label = "ENGAGE";
+  let action = "/api/engage";
+  let style = "btn--engage";
+
+  if (canDisengage) {
+    label = "DISENGAGE";
+    action = "/api/disengage";
+    style = "btn--disengage";
+  } else if (onics.state === "STOPPING") {
+    label = "STOPPING";
+    action = null;
+    style = "btn--disengage";
+  }
+
+  engageToggleBtn.textContent = label;
+  engageToggleBtn.classList.remove("btn--engage", "btn--disengage");
+  engageToggleBtn.classList.add(style);
+  engageToggleBtn.disabled = !(
+    (action === "/api/engage" && canEngage) ||
+    (action === "/api/disengage" && canDisengage)
+  );
+  engageToggleAction = action;
 }
 
 const telemetryState = {
@@ -431,10 +463,12 @@ function updateSnapshot(snapshot) {
     }
   }
 
-  const canEngage = onics.state === "IDLE" || onics.state === "ERROR" || onics.state === "LOS";
-  const canDisengage = onics.state === "RUNNING" || onics.state === "STARTING";
-  engageBtn.disabled = !canEngage;
-  disengageBtn.disabled = !canDisengage;
+  updateEngageToggle(onics);
+
+  const restartReady = health.tailscale_ok && health.dns_ok && health.tcp_ok;
+  serviceRestartButtons.forEach((button) => {
+    button.disabled = !restartReady;
+  });
 }
 
 function appendLog(line) {
@@ -460,23 +494,16 @@ async function sendCommand(path) {
   return res.json();
 }
 
-engageBtn?.addEventListener("click", async () => {
-  engageBtn.disabled = true;
-  try {
-    const data = await sendCommand("/api/engage");
-    updateSnapshot(data.snapshot);
-  } catch (err) {
-    appendLog(`ENGAGE FAILED: ${err.message}`);
+engageToggleBtn?.addEventListener("click", async () => {
+  if (!engageToggleAction) {
+    return;
   }
-});
-
-disengageBtn?.addEventListener("click", async () => {
-  disengageBtn.disabled = true;
+  engageToggleBtn.disabled = true;
   try {
-    const data = await sendCommand("/api/disengage");
+    const data = await sendCommand(engageToggleAction);
     updateSnapshot(data.snapshot);
   } catch (err) {
-    appendLog(`DISENGAGE FAILED: ${err.message}`);
+    appendLog(`COMMAND FAILED: ${err.message}`);
   }
 });
 
@@ -499,6 +526,25 @@ clearBtn?.addEventListener("click", async () => {
   } finally {
     clearBtn.disabled = false;
   }
+});
+
+serviceRestartButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const service = button.getAttribute("data-service-restart");
+    if (!service) {
+      return;
+    }
+    button.disabled = true;
+    try {
+      const data = await sendCommand(`/api/services/${service}/restart`);
+      updateSnapshot(data.snapshot);
+      appendLog(`RESTART REQUESTED: ${service}`);
+    } catch (err) {
+      appendLog(`RESTART FAILED (${service}): ${err.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
 });
 
 loginDismissBtn?.addEventListener("click", () => {
