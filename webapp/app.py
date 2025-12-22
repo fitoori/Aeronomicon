@@ -107,6 +107,11 @@ SSH_AUTH_TIMEOUT_S = float(os.environ.get("SSH_AUTH_TIMEOUT_S", "6.0"))
 STOP_GRACE_S = float(os.environ.get("STOP_GRACE_S", "3.0"))
 STOP_POLL_S = float(os.environ.get("STOP_POLL_S", "0.25"))
 
+# Auto-restart behavior (when ENGAGED)
+AUTO_RESTART_DELAY_S = float(os.environ.get("AUTO_RESTART_DELAY_S", "3.0"))
+AUTO_RESTART_WINDOW_S = float(os.environ.get("AUTO_RESTART_WINDOW_S", "120.0"))
+AUTO_RESTART_MAX = int(os.environ.get("AUTO_RESTART_MAX", "3"))
+
 # Flask server
 FLASK_HOST = os.environ.get("FLASK_HOST", "0.0.0.0").strip()
 FLASK_PORT = int(os.environ.get("FLASK_PORT", "8080"))
@@ -252,6 +257,7 @@ class OnicsRuntime:
     last_error: str = ""
     login_required: bool = False
     login_message: str = ""
+    engaged: bool = False
 
 
 @dataclasses.dataclass
@@ -298,6 +304,7 @@ class OnicsController:
         self._reader_thread: Optional[threading.Thread] = None
 
         self._fail_events_60s: Deque[float] = deque()
+        self._restart_events: Deque[float] = deque()
         self._last_tailscale_check = 0.0
         self._last_dns_check = 0.0
         self._last_tcp_check = 0.0
@@ -769,7 +776,7 @@ class OnicsController:
 
     # --- Remote ONICS lifecycle
 
-    def start_onics(self) -> Tuple[bool, str]:
+    def start_onics(self, *, auto_restart: bool = False) -> Tuple[bool, str]:
         with self._lock:
             if self._runtime.state in ("STARTING", "RUNNING", "STOPPING"):
                 return False, f"ONICS-T is already {self._runtime.state}"
@@ -777,6 +784,7 @@ class OnicsController:
             if not (self._health.tailscale_ok and self._health.dns_ok and self._health.tcp_ok):
                 return False, "Tailnet/SSH health is not OK; refusing to start"
             self._stop_requested = False
+            self._runtime.engaged = True
             self._runtime.remote_pid = None
             self._runtime.last_error = ""
             self._runtime.ssh_connected = False
@@ -786,6 +794,8 @@ class OnicsController:
             self._runtime.last_ssh_ok_mono = 0.0
             self._runtime.login_required = False
             self._runtime.login_message = ""
+            if not auto_restart:
+                self._restart_events.clear()
 
         self._set_state("STARTING")
         t = threading.Thread(target=self._remote_run_thread, name="onics-ssh-reader", daemon=True)
@@ -798,6 +808,7 @@ class OnicsController:
             st = self._runtime.state
             pid = self._runtime.remote_pid
             self._stop_requested = True
+            self._runtime.engaged = False
             if st not in ("STARTING", "RUNNING"):
                 return False, f"ONICS-T is not running (state={st})"
             self._runtime.state = "STOPPING"
@@ -888,6 +899,45 @@ class OnicsController:
             return int(m)
         except Exception:
             return None
+
+    def _schedule_auto_restart(self, reason: str) -> None:
+        with self._lock:
+            if not self._runtime.engaged:
+                return
+            if self._stop_requested:
+                return
+
+            now_m = monotonic_s()
+            while self._restart_events and (now_m - self._restart_events[0]) > AUTO_RESTART_WINDOW_S:
+                self._restart_events.popleft()
+
+            if len(self._restart_events) >= AUTO_RESTART_MAX:
+                self._append_log(
+                    f"AUTO-RESTART ABORTED: exceeded {AUTO_RESTART_MAX} attempts in "
+                    f"{int(AUTO_RESTART_WINDOW_S)}s"
+                )
+                self._set_state("ERROR", "Auto-restart limit reached")
+                return
+
+            self._restart_events.append(now_m)
+
+        self._append_log(
+            f"AUTO-RESTART: scheduling restart in {AUTO_RESTART_DELAY_S:.1f}s ({reason})"
+        )
+
+        def _delayed_restart() -> None:
+            time.sleep(max(0.0, AUTO_RESTART_DELAY_S))
+            ok, msg = self.start_onics(auto_restart=True)
+            if ok:
+                self._append_log("AUTO-RESTART: starting ONICS-T")
+            else:
+                self._append_log(f"AUTO-RESTART FAILED: {msg}")
+
+        threading.Thread(
+            target=_delayed_restart,
+            name="onics-auto-restart",
+            daemon=True,
+        ).start()
 
     def _remote_run_thread(self) -> None:
         # Connect SSH
@@ -1019,6 +1069,7 @@ class OnicsController:
             else:
                 self._append_log(f"ONICS-T EXITED (unexpected). exit_status={exit_status}")
                 self._set_state("LOS", "ONICS-T ended unexpectedly or SSH stream terminated")
+                self._schedule_auto_restart("unexpected exit")
 
         except Exception as e:
             self._mark_failure()
@@ -1032,6 +1083,7 @@ class OnicsController:
                 self._set_state("IDLE")
             else:
                 self._set_state("LOS", msg)
+                self._schedule_auto_restart("ssh stream error")
         finally:
             self._ssh_close()
 
