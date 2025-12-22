@@ -92,6 +92,7 @@ HEALTH_TICK_HZ = float(os.environ.get("HEALTH_TICK_HZ", "1.0"))     # status pus
 TAILSCALE_CHECK_S = float(os.environ.get("TAILSCALE_CHECK_S", "4.0"))  # local tailscale status check period
 DNS_CHECK_S = float(os.environ.get("DNS_CHECK_S", "2.0"))
 TCP_CHECK_S = float(os.environ.get("TCP_CHECK_S", "2.0"))
+SERVICE_CHECK_S = float(os.environ.get("SERVICE_CHECK_S", "3.0"))
 
 # "Staleness" thresholds (seconds)
 REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
@@ -253,6 +254,11 @@ class OnicsRuntime:
     login_message: str = ""
 
 
+@dataclasses.dataclass
+class AutopilotHealth:
+    services: Dict[str, Dict[str, Any]] = dataclasses.field(default_factory=dict)
+
+
 # ---- ONICS-T controller ------------------------------------------------------
 
 
@@ -263,6 +269,28 @@ class OnicsController:
         self._logs: Deque[str] = deque(maxlen=MAX_LOG_LINES)
         self._runtime = OnicsRuntime()
         self._health = TailnetHealth()
+        self._autopilot = AutopilotHealth(
+            services={
+                "arducopter": {
+                    "unit": "arducopter.service",
+                    "status": "UNKNOWN",
+                    "detail": "Awaiting status.",
+                    "active": False,
+                },
+                "mavproxy": {
+                    "unit": "mavproxy.service",
+                    "status": "UNKNOWN",
+                    "detail": "Awaiting status.",
+                    "active": False,
+                },
+                "uplink": {
+                    "unit": "uplink.service",
+                    "status": "UNKNOWN",
+                    "detail": "Awaiting status.",
+                    "active": False,
+                },
+            }
+        )
         self._stop_requested = False
         self._ssh: Optional[paramiko.SSHClient] = None
         self._ssh_transport: Optional[paramiko.Transport] = None
@@ -273,6 +301,7 @@ class OnicsController:
         self._last_tailscale_check = 0.0
         self._last_dns_check = 0.0
         self._last_tcp_check = 0.0
+        self._last_service_check = 0.0
 
     # --- Logging & publishing
 
@@ -369,6 +398,7 @@ class OnicsController:
         with self._lock:
             rt = dataclasses.asdict(self._runtime)
             hl = dataclasses.asdict(self._health)
+            ap = dataclasses.asdict(self._autopilot)
             logs = list(self._logs)[-MAX_LOG_LINES:]
         # Derived ages (computed server-side)
         now_m = monotonic_s()
@@ -397,6 +427,7 @@ class OnicsController:
                 "server_time_iso": wall_time_iso(),
             },
             "health": hl,
+            "autopilot": ap,
             "onics": rt,
             "logs": logs,
         }
@@ -536,6 +567,87 @@ class OnicsController:
             self._health.tcp_ip = ip
             self._health.tcp_error = err
 
+    def _service_status(self, unit: str) -> Dict[str, Any]:
+        exe = which_or_none("systemctl")
+        if not exe:
+            return {
+                "unit": unit,
+                "status": "MISSING",
+                "detail": "systemctl not found",
+                "active": False,
+            }
+
+        active_state = "UNKNOWN"
+        sub_state = ""
+        description = ""
+        detail = ""
+
+        try:
+            p = subprocess.run(
+                [exe, "show", unit, "--property=ActiveState,SubState,Description", "--no-page"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=1.2,
+                check=False,
+            )
+            if p.returncode == 0:
+                for line in (p.stdout or "").splitlines():
+                    key, _, value = line.partition("=")
+                    if key == "ActiveState":
+                        active_state = value.strip() or active_state
+                    elif key == "SubState":
+                        sub_state = value.strip()
+                    elif key == "Description":
+                        description = value.strip()
+            else:
+                detail = (p.stderr or p.stdout or "").strip()
+        except Exception as e:
+            detail = f"{type(e).__name__}: {e}"
+
+        if active_state == "UNKNOWN":
+            try:
+                p2 = subprocess.run(
+                    [exe, "is-active", unit],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=1.0,
+                    check=False,
+                )
+                active_state = (p2.stdout or p2.stderr or "").strip() or active_state
+                if not detail:
+                    detail = f"systemctl is-active: {active_state}"
+            except Exception as e:
+                if not detail:
+                    detail = f"{type(e).__name__}: {e}"
+
+        detail_parts = [part for part in (description, sub_state) if part]
+        detail_line = " · ".join(detail_parts) if detail_parts else detail
+
+        return {
+            "unit": unit,
+            "status": active_state or "UNKNOWN",
+            "detail": detail_line or detail,
+            "active": active_state == "active",
+        }
+
+    def _services_check(self) -> None:
+        updates: Dict[str, Dict[str, Any]] = {}
+        with self._lock:
+            service_units = {
+                key: entry.get("unit", "")
+                for key, entry in self._autopilot.services.items()
+                if entry.get("unit")
+            }
+
+        for key, unit in service_units.items():
+            updates[key] = self._service_status(unit)
+
+        with self._lock:
+            for key, value in updates.items():
+                self._autopilot.services[key] = value
+
     def health_tick(self) -> None:
         now_m = monotonic_s()
         if (now_m - self._last_tailscale_check) >= TAILSCALE_CHECK_S:
@@ -549,6 +661,10 @@ class OnicsController:
         if (now_m - self._last_tcp_check) >= TCP_CHECK_S:
             self._last_tcp_check = now_m
             self._tcp_check()
+
+        if (now_m - self._last_service_check) >= SERVICE_CHECK_S:
+            self._last_service_check = now_m
+            self._services_check()
 
         # Compute stale/LOS and stability score.
         with self._lock:

@@ -30,6 +30,13 @@ const startupMeta = document.getElementById("startup-meta");
 const autopilotAlert = document.getElementById("autopilot-alert");
 const autopilotMeta = document.getElementById("autopilot-meta");
 
+const arducopterStatus = document.getElementById("arducopter-status");
+const arducopterMeta = document.getElementById("arducopter-meta");
+const mavproxyStatus = document.getElementById("mavproxy-status");
+const mavproxyMeta = document.getElementById("mavproxy-meta");
+const uplinkStatus = document.getElementById("uplink-status");
+const uplinkMeta = document.getElementById("uplink-meta");
+
 const cards = {
   tailscale: document.getElementById("tailscale-card"),
   dns: document.getElementById("dns-card"),
@@ -255,6 +262,25 @@ function updateSnapshot(snapshot) {
     staleStatus.textContent = "OK";
     staleMeta.textContent = `Last ok ${formatAge(health.last_ok_age_s)} ago.`;
     setCardState(cards.stale, "ok");
+  }
+
+  if (snapshot.autopilot && snapshot.autopilot.services) {
+    const services = snapshot.autopilot.services;
+    const arducopter = services.arducopter || {};
+    const mavproxy = services.mavproxy || {};
+    const uplink = services.uplink || {};
+
+    arducopterStatus.textContent = formatServiceStatus(arducopter.status);
+    arducopterMeta.textContent = arducopter.detail || "Awaiting status.";
+    setCardState(cards.arducopter, serviceStateToCard(arducopter.status));
+
+    mavproxyStatus.textContent = formatServiceStatus(mavproxy.status);
+    mavproxyMeta.textContent = mavproxy.detail || "Awaiting status.";
+    setCardState(cards.mavproxy, serviceStateToCard(mavproxy.status));
+
+    uplinkStatus.textContent = formatServiceStatus(uplink.status);
+    uplinkMeta.textContent = uplink.detail || "Awaiting status.";
+    setCardState(cards.uplink, serviceStateToCard(uplink.status));
   }
 
   const canEngage = onics.state === "IDLE" || onics.state === "ERROR" || onics.state === "LOS";

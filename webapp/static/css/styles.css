@@ -92,6 +92,11 @@ body {
   gap: 20px;
 }
 
+.grid--primary {
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.3fr);
+  align-items: stretch;
+}
+
 .panel {
   background: linear-gradient(135deg, rgba(31, 39, 56, 0.8), rgba(19, 24, 36, 0.9));
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -133,6 +138,38 @@ body {
 
 .panel__body--logs {
   padding-top: 0;
+}
+
+.toolbar-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.toolbar {
+  background: rgba(13, 17, 26, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toolbar__header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.toolbar__header p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.toolbar__items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
 }
 
 .button-row {
@@ -208,12 +245,6 @@ body {
   grid-column: 1 / -1;
   font-size: 0.85rem;
   color: var(--muted);
-}
-
-.health-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
 }
 
 .health-card {
@@ -410,6 +441,10 @@ body {
   }
 
   .status-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .grid--primary {
     grid-template-columns: 1fr;
   }
 }

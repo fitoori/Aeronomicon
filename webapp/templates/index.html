@@ -62,7 +62,7 @@
         <div class="shell__status" id="connection-pill">LINK: INIT</div>
       </header>
 
-      <section class="grid">
+      <section class="grid grid--primary">
         <article class="panel">
           <header class="panel__header">
             <h2>Command Deck</h2>
@@ -86,31 +86,41 @@
 
         <article class="panel">
           <header class="panel__header">
+            <h2>Telemetry Log</h2>
+            <p>Live stdout/stderr stream (most recent first).</p>
+          </header>
+          <div class="panel__body panel__body--logs">
+            <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="toolbar-grid">
+        <article class="toolbar" id="health-panel">
+          <div class="toolbar__header">
             <h2>Tailnet Health</h2>
             <p>MagicDNS + SSH readiness.</p>
-          </header>
-          <div class="panel__body" id="health-panel">
-            <div class="health-grid">
-              <div class="health-card" id="tailscale-card">
-                <h3>Tailscale</h3>
-                <p class="health-card__value" id="tailscale-status">UNKNOWN</p>
-                <p class="health-card__meta" id="tailscale-meta">Awaiting signal.</p>
-              </div>
-              <div class="health-card" id="dns-card">
-                <h3>MagicDNS</h3>
-                <p class="health-card__value" id="dns-status">UNKNOWN</p>
-                <p class="health-card__meta" id="dns-meta">Awaiting DNS resolution.</p>
-              </div>
-              <div class="health-card" id="tcp-card">
-                <h3>SSH Probe</h3>
-                <p class="health-card__value" id="tcp-status">UNKNOWN</p>
-                <p class="health-card__meta" id="tcp-meta">Awaiting TCP telemetry.</p>
-              </div>
-              <div class="health-card" id="stale-card">
-                <h3>Staleness</h3>
-                <p class="health-card__value" id="stale-status">OK</p>
-                <p class="health-card__meta" id="stale-meta">No signal loss.</p>
-              </div>
+          </div>
+          <div class="toolbar__items">
+            <div class="health-card" id="tailscale-card">
+              <h3>Tailscale</h3>
+              <p class="health-card__value" id="tailscale-status">UNKNOWN</p>
+              <p class="health-card__meta" id="tailscale-meta">Awaiting signal.</p>
+            </div>
+            <div class="health-card" id="dns-card">
+              <h3>MagicDNS</h3>
+              <p class="health-card__value" id="dns-status">UNKNOWN</p>
+              <p class="health-card__meta" id="dns-meta">Awaiting DNS resolution.</p>
+            </div>
+            <div class="health-card" id="tcp-card">
+              <h3>SSH Probe</h3>
+              <p class="health-card__value" id="tcp-status">UNKNOWN</p>
+              <p class="health-card__meta" id="tcp-meta">Awaiting TCP telemetry.</p>
+            </div>
+            <div class="health-card" id="stale-card">
+              <h3>Staleness</h3>
+              <p class="health-card__value" id="stale-status">OK</p>
+              <p class="health-card__meta" id="stale-meta">No signal loss.</p>
             </div>
           </div>
         </article>
