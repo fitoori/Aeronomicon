@@ -339,7 +339,7 @@ function updateSnapshot(snapshot) {
     const restartFails = Number.isFinite(onics.restart_failures)
       ? onics.restart_failures
       : 0;
-    startupFails.textContent = `Restart fails: ${restartFails}`;
+    startupFails.textContent = `${restartFails}`;
   }
 
   tailscaleStatus.textContent = health.tailscale_ok ? "RUNNING" : "OFFLINE";

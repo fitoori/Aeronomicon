@@ -181,10 +181,13 @@
                 <p class="health-card__meta" id="tracking-meta">No tracking updates yet.</p>
               </div>
               <div class="health-card" id="startup-card">
-                <h3>Startup Stage</h3>
+                <div class="health-card__header">
+                  <h3>Startup Stage</h3>
+                  <p class="startup-fails__value" id="startup-fails">0</p>
+                </div>
                 <p class="health-card__value" id="startup-stage">Awaiting telemetry</p>
                 <p class="health-card__meta" id="startup-meta">No startup milestones yet.</p>
-                <p class="health-card__meta" id="startup-fails">Restart fails: 0</p>
+                <p class="health-card__meta startup-fails__label">Restart fails</p>
               </div>
               <div class="health-card" id="autopilot-card">
                 <h3>Autopilot Alerts</h3>

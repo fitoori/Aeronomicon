@@ -265,6 +265,13 @@ body {
   font-size: 0.9rem;
 }
 
+.health-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .health-card__value {
   margin: 0;
   font-weight: 700;
@@ -275,6 +282,20 @@ body {
   margin: 0.3rem 0 0;
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+.startup-fails__value {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: var(--danger);
+  line-height: 1;
+  text-align: right;
+}
+
+.startup-fails__label {
+  text-align: right;
+  margin-top: 0.4rem;
 }
 
 .health-card--ok {
