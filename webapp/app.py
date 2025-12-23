@@ -500,6 +500,12 @@ class OnicsController:
                         mem_available = int(line.split()[1]) * 1024
             if mem_total is not None:
                 stats["mem_total_bytes"] = mem_total
+            if (
+                mem_total is not None
+                and mem_available is not None
+                and mem_available > mem_total
+            ):
+                mem_available = None
             if mem_available is not None:
                 stats["mem_available_bytes"] = mem_available
             if mem_total is not None and mem_available is not None:
