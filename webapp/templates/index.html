@@ -49,12 +49,14 @@
     <main class="shell" aria-live="polite">
       <header class="shell__header">
         <div class="shell__brand">
-          <img
-            src="{{ url_for('static', filename='img/onics-seal.svg') }}"
-            alt="ONICS seal"
-            class="shell__logo"
-          />
-          <p class="shell__meta" id="app-meta">Awaiting system stats...</p>
+          <div class="shell__logo-wrap" aria-hidden="true">
+            <img
+              src="{{ url_for('static', filename='img/onics-seal.svg') }}"
+              alt="ONICS seal"
+              class="shell__logo"
+            />
+          </div>
+          <p class="shell__meta" id="app-meta">Awaiting link...</p>
         </div>
         <div class="shell__status" id="connection-pill">LINK: INIT</div>
       </header>
