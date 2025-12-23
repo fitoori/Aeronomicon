@@ -3,7 +3,6 @@ const clearBtn = document.getElementById("clear-btn");
 const logView = document.getElementById("log-view");
 const loadingScreen = document.getElementById("loading-screen");
 const connectionPill = document.getElementById("connection-pill");
-const appMeta = document.getElementById("app-meta");
 const onicsState = document.querySelector("#onics-state .status-strip__value");
 const onicsRuntime = document.getElementById("onics-runtime");
 const loginModal = document.getElementById("login-modal");
@@ -43,6 +42,10 @@ const systemDisk = document.getElementById("system-disk");
 const systemDiskMeta = document.getElementById("system-disk-meta");
 const systemUptime = document.getElementById("system-uptime");
 const systemUptimeMeta = document.getElementById("system-uptime-meta");
+const headerLoad = document.getElementById("header-load");
+const headerMemory = document.getElementById("header-memory");
+const headerDisk = document.getElementById("header-disk");
+const headerUptime = document.getElementById("header-uptime");
 
 let engageToggleAction = null;
 
@@ -439,9 +442,6 @@ function updateSnapshot(snapshot) {
   }
 
   const { meta, health, onics, autopilot } = snapshot;
-  if (appMeta) {
-    appMeta.textContent = formatHeaderReadout(meta, autopilot?.system);
-  }
   setLoginPrompt(meta, onics);
 
   const linkDegraded =
@@ -543,6 +543,27 @@ function updateSnapshot(snapshot) {
 
   if (autopilot && autopilot.system) {
     const system = autopilot.system;
+    if (headerLoad) {
+      headerLoad.textContent =
+        system.load_1 !== null && system.load_5 !== null && system.load_15 !== null
+          ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
+          : "n/a";
+    }
+    if (headerMemory) {
+      headerMemory.textContent =
+        system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
+          ? formatBytes(system.mem_available_bytes)
+          : "n/a";
+    }
+    if (headerDisk) {
+      headerDisk.textContent =
+        system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
+          ? formatBytes(system.disk_free_bytes)
+          : "n/a";
+    }
+    if (headerUptime) {
+      headerUptime.textContent = formatUptime(system.uptime_s);
+    }
     if (systemLoad) {
       if (system.load_1 !== null && system.load_5 !== null && system.load_15 !== null) {
         systemLoad.textContent = `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(
