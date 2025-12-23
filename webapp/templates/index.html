@@ -90,9 +90,6 @@
             <div class="button-row">
               <button class="btn btn--engage" id="engage-toggle-btn">ENGAGE</button>
             </div>
-            <div class="button-row button-row--secondary">
-              <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
-            </div>
             <div class="status-strip" id="onics-state">
               <span class="status-strip__label">State</span>
               <strong class="status-strip__value">IDLE</strong>
@@ -102,8 +99,9 @@
         </article>
 
         <article class="panel">
-          <header class="panel__header">
+          <header class="panel__header panel__header--actions">
             <h2>Telemetry Log</h2>
+            <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
           </header>
           <div class="panel__body panel__body--logs">
             <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
