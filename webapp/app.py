@@ -33,6 +33,7 @@ import getpass
 import json
 import os
 import queue
+import re
 import shutil
 import shlex
 import signal
@@ -94,6 +95,11 @@ TAILSCALE_CHECK_S = float(os.environ.get("TAILSCALE_CHECK_S", "4.0"))  # local t
 DNS_CHECK_S = float(os.environ.get("DNS_CHECK_S", "2.0"))
 TCP_CHECK_S = float(os.environ.get("TCP_CHECK_S", "2.0"))
 SERVICE_CHECK_S = float(os.environ.get("SERVICE_CHECK_S", "3.0"))
+LTE_SIGNAL_CHECK_S = float(os.environ.get("LTE_SIGNAL_CHECK_S", "10.0"))
+LTE_QMICLI_DEVICE = os.environ.get("LTE_QMICLI_DEVICE", "/dev/cdc-wdm0").strip()
+LTE_QMICLI_TIMEOUT_S = float(os.environ.get("LTE_QMICLI_TIMEOUT_S", "3.0"))
+LTE_RSSI_MIN = int(os.environ.get("LTE_RSSI_MIN", "-113"))
+LTE_RSSI_MAX = int(os.environ.get("LTE_RSSI_MAX", "-51"))
 
 # "Staleness" thresholds (seconds)
 REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
@@ -313,6 +319,8 @@ class OnicsController:
         self._last_dns_check = 0.0
         self._last_tcp_check = 0.0
         self._last_service_check = 0.0
+        self._last_lte_check = 0.0
+        self._lte_signal_cache: Dict[str, Any] = {}
 
     # --- Logging & publishing
 
@@ -412,6 +420,7 @@ class OnicsController:
             ap = dataclasses.asdict(self._autopilot)
             logs = list(self._logs)[-MAX_LOG_LINES:]
         ap["system"] = self._system_stats()
+        ap["system"].update(self._lte_signal_stats())
         # Derived ages (computed server-side)
         now_m = monotonic_s()
         rt["state_age_s"] = round(max(0.0, now_m - rt.get("last_state_change_mono", 0.0)), 3)
@@ -514,6 +523,72 @@ class OnicsController:
             pass
 
         return stats
+
+    @staticmethod
+    def _parse_lte_rssi(output: str) -> Optional[float]:
+        lines = output.splitlines()
+        for idx, line in enumerate(lines):
+            if "RSSI:" not in line:
+                continue
+            for follow in lines[idx + 1 : idx + 4]:
+                match = re.search(r"'(?P<rssi>-?\d+(?:\.\d+)?) dBm'", follow)
+                if match:
+                    return float(match.group("rssi"))
+        return None
+
+    def _lte_signal_stats(self) -> Dict[str, Any]:
+        now_m = monotonic_s()
+        if (now_m - self._last_lte_check) < LTE_SIGNAL_CHECK_S and self._lte_signal_cache:
+            return dict(self._lte_signal_cache)
+        self._last_lte_check = now_m
+
+        stats: Dict[str, Any] = {
+            "lte_signal_percent": None,
+            "lte_rssi_dbm": None,
+            "lte_signal_error": "LTE signal unavailable.",
+        }
+
+        exe = which_or_none("qmicli")
+        if not exe:
+            stats["lte_signal_error"] = "qmicli not found."
+            self._lte_signal_cache = stats
+            return dict(stats)
+
+        cmd = [exe, f"--device={LTE_QMICLI_DEVICE}", "--nas-get-signal-strength"]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=LTE_QMICLI_TIMEOUT_S,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            stats["lte_signal_error"] = f"qmicli error: {exc}"
+            self._lte_signal_cache = stats
+            return dict(stats)
+
+        output = (proc.stdout or "") + (proc.stderr or "")
+        if proc.returncode != 0:
+            stats["lte_signal_error"] = f"qmicli failed ({proc.returncode})."
+            self._lte_signal_cache = stats
+            return dict(stats)
+
+        rssi = self._parse_lte_rssi(output)
+        if rssi is None:
+            stats["lte_signal_error"] = "RSSI not found."
+            self._lte_signal_cache = stats
+            return dict(stats)
+
+        clamped = max(min(rssi, LTE_RSSI_MAX), LTE_RSSI_MIN)
+        denominator = LTE_RSSI_MAX - LTE_RSSI_MIN
+        percent = 0.0 if denominator == 0 else ((clamped - LTE_RSSI_MIN) / denominator) * 100.0
+
+        stats["lte_signal_percent"] = round(percent, 2)
+        stats["lte_rssi_dbm"] = round(clamped, 2)
+        stats["lte_signal_error"] = ""
+        self._lte_signal_cache = stats
+        return dict(stats)
 
     def _tailscale_check(self) -> None:
         exe = which_or_none("tailscale")
