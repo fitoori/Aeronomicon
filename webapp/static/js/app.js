@@ -364,9 +364,11 @@ function updateSnapshot(snapshot) {
       : "#4ade80";
 
   onicsState.textContent = onics.state;
-  onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
-    onics.last_output_age_s
-  )}`;
+  if (onicsRuntime) {
+    onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
+      onics.last_output_age_s
+    )}`;
+  }
   if (startupFails) {
     const restartFails = Number.isFinite(onics.restart_failures)
       ? onics.restart_failures
