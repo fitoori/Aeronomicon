@@ -48,6 +48,8 @@ body {
   display: flex;
   gap: 16px;
   align-items: flex-start;
+  flex-wrap: wrap;
+  flex: 1 1 320px;
 }
 
 .shell__logo-wrap {
@@ -93,13 +95,14 @@ body {
   display: flex;
   gap: 10px;
   flex: 1;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: stretch;
 }
 
 .shell__stat-card {
   padding: 10px 12px;
-  flex: 1 1 0;
+  flex: 1 1 140px;
+  min-width: 120px;
 }
 
 .shell__stat-card h3 {
@@ -187,6 +190,8 @@ body {
 .toolbar-grid {
   display: grid;
   gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  align-items: start;
 }
 
 .toolbar {
