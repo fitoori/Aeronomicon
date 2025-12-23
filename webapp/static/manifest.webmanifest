@@ -1,0 +1,17 @@
+{
+  "name": "ONICS Remote Console",
+  "short_name": "ONICS Console",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0a120f",
+  "theme_color": "#0a120f",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "img/onics-seal.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    }
+  ]
+}

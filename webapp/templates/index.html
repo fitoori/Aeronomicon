@@ -2,8 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a120f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ONICS Console" />
     <title>{{ title }} Remote Console</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/onics-seal.svg') }}" />
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/onics-seal.svg') }}" />
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
     <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
   </head>
@@ -19,9 +27,6 @@
     <div class="modal" id="login-modal" aria-hidden="true">
       <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="login-title">
         <h2 id="login-title">SSH Login Required</h2>
-        <p class="modal__message" id="login-message">
-          SSH authentication is missing. Complete an interactive login to continue.
-        </p>
         <div class="modal__command">
           <span>Command</span>
           <code id="login-command">ssh user@host</code>
@@ -58,7 +63,6 @@
         <article class="panel">
           <header class="panel__header">
             <h2>Command Deck</h2>
-            <p>Send guarded engage/disengage commands.</p>
           </header>
           <div class="panel__body">
             <div class="button-row">
@@ -70,7 +74,6 @@
             <div class="status-strip" id="onics-state">
               <span class="status-strip__label">State</span>
               <strong class="status-strip__value">IDLE</strong>
-              <span class="status-strip__meta" id="onics-runtime">No runtime telemetry.</span>
             </div>
           </div>
         </article>
@@ -78,7 +81,6 @@
         <article class="panel">
           <header class="panel__header">
             <h2>Telemetry Log</h2>
-            <p>Live stdout/stderr stream (most recent first).</p>
           </header>
           <div class="panel__body panel__body--logs">
             <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
@@ -90,14 +92,12 @@
         <article class="panel">
           <header class="panel__header">
             <h2>Vehicle Telemetry</h2>
-            <p>Parsed milestones from the ONICS-T log stream.</p>
           </header>
           <div class="panel__body">
             <div class="health-grid">
               <div class="health-card" id="tracking-card">
                 <h3>Tracking Confidence</h3>
                 <p class="health-card__value" id="tracking-confidence">Awaiting telemetry</p>
-                <p class="health-card__meta" id="tracking-meta">No tracking updates yet.</p>
               </div>
               <div class="health-card" id="startup-card">
                 <div class="health-card__header">
@@ -105,13 +105,10 @@
                   <p class="startup-fails__value" id="startup-fails">0</p>
                 </div>
                 <p class="health-card__value" id="startup-stage">Awaiting telemetry</p>
-                <p class="health-card__meta" id="startup-meta">No startup milestones yet.</p>
-                <p class="health-card__meta startup-fails__label">Restart fails</p>
               </div>
               <div class="health-card" id="autopilot-card">
                 <h3>Autopilot Alerts</h3>
                 <p class="health-card__value" id="autopilot-alert">Awaiting telemetry</p>
-                <p class="health-card__meta" id="autopilot-meta">No autopilot alerts yet.</p>
               </div>
             </div>
           </div>
@@ -120,23 +117,19 @@
         <article class="toolbar" id="health-panel">
           <div class="toolbar__header">
             <h2>Tailnet Health</h2>
-            <p>MagicDNS + SSH readiness.</p>
           </div>
           <div class="toolbar__items">
             <div class="health-card" id="tailscale-card">
               <h3>Tailscale</h3>
               <p class="health-card__value" id="tailscale-status">UNKNOWN</p>
-              <p class="health-card__meta" id="tailscale-meta">Awaiting signal.</p>
             </div>
             <div class="health-card" id="dns-card">
               <h3>MagicDNS</h3>
               <p class="health-card__value" id="dns-status">UNKNOWN</p>
-              <p class="health-card__meta" id="dns-meta">Awaiting DNS resolution.</p>
             </div>
             <div class="health-card" id="tcp-card">
               <h3>SSH Probe</h3>
               <p class="health-card__value" id="tcp-status">UNKNOWN</p>
-              <p class="health-card__meta" id="tcp-meta">Awaiting TCP telemetry.</p>
             </div>
           </div>
         </article>
@@ -144,7 +137,6 @@
         <article class="panel">
           <header class="panel__header">
             <h2>Autopilot Health</h2>
-            <p>Service status and system telemetry from the flight stack host.</p>
           </header>
           <div class="panel__body">
             <div class="health-grid">
@@ -154,7 +146,6 @@
                   <button class="btn btn--service" data-service-restart="arducopter">Restart</button>
                 </div>
                 <p class="health-card__value" id="arducopter-status">UNKNOWN</p>
-                <p class="health-card__meta" id="arducopter-meta">Awaiting status.</p>
               </div>
               <div class="health-card" id="mavproxy-card">
                 <div class="health-card__header">
@@ -162,7 +153,6 @@
                   <button class="btn btn--service" data-service-restart="mavproxy">Restart</button>
                 </div>
                 <p class="health-card__value" id="mavproxy-status">UNKNOWN</p>
-                <p class="health-card__meta" id="mavproxy-meta">Awaiting status.</p>
               </div>
               <div class="health-card" id="uplink-card">
                 <div class="health-card__header">
@@ -170,29 +160,24 @@
                   <button class="btn btn--service" data-service-restart="uplink">Restart</button>
                 </div>
                 <p class="health-card__value" id="uplink-status">UNKNOWN</p>
-                <p class="health-card__meta" id="uplink-meta">Awaiting status.</p>
               </div>
             </div>
             <div class="health-grid">
               <div class="health-card" id="system-load-card">
                 <h3>System Load</h3>
                 <p class="health-card__value" id="system-load">-</p>
-                <p class="health-card__meta" id="system-load-meta">Awaiting telemetry.</p>
               </div>
               <div class="health-card" id="system-memory-card">
                 <h3>Memory</h3>
                 <p class="health-card__value" id="system-memory">-</p>
-                <p class="health-card__meta" id="system-memory-meta">Awaiting telemetry.</p>
               </div>
               <div class="health-card" id="system-disk-card">
                 <h3>Disk</h3>
                 <p class="health-card__value" id="system-disk">-</p>
-                <p class="health-card__meta" id="system-disk-meta">Awaiting telemetry.</p>
               </div>
               <div class="health-card" id="system-uptime-card">
                 <h3>Uptime</h3>
                 <p class="health-card__value" id="system-uptime">-</p>
-                <p class="health-card__meta" id="system-uptime-meta">Awaiting telemetry.</p>
               </div>
             </div>
           </div>
