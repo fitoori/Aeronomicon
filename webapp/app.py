@@ -96,6 +96,7 @@ DNS_CHECK_S = float(os.environ.get("DNS_CHECK_S", "2.0"))
 TCP_CHECK_S = float(os.environ.get("TCP_CHECK_S", "2.0"))
 SERVICE_CHECK_S = float(os.environ.get("SERVICE_CHECK_S", "3.0"))
 LTE_SIGNAL_CHECK_S = float(os.environ.get("LTE_SIGNAL_CHECK_S", "10.0"))
+SYSTEM_STATS_CHECK_S = float(os.environ.get("SYSTEM_STATS_CHECK_S", "5.0"))
 LTE_QMICLI_DEVICE = os.environ.get("LTE_QMICLI_DEVICE", "/dev/cdc-wdm0").strip()
 LTE_QMICLI_TIMEOUT_S = float(os.environ.get("LTE_QMICLI_TIMEOUT_S", "3.0"))
 LTE_RSSI_MIN = int(os.environ.get("LTE_RSSI_MIN", "-113"))
@@ -320,9 +321,14 @@ class OnicsController:
         self._last_tcp_check = 0.0
         self._last_service_check = 0.0
         self._last_lte_check = 0.0
+        self._last_system_check = 0.0
         self._lte_signal_cache: Dict[str, Any] = {}
         self._service_backoff_until = 0.0
         self._service_backoff_s = 0.0
+        self._system_backoff_until = 0.0
+        self._system_backoff_s = 0.0
+        with self._lock:
+            self._autopilot.system = self._blank_system_stats()
 
     # --- Logging & publishing
 
@@ -421,7 +427,6 @@ class OnicsController:
             hl = dataclasses.asdict(self._health)
             ap = dataclasses.asdict(self._autopilot)
             logs = list(self._logs)[-MAX_LOG_LINES:] if include_logs else []
-        ap["system"] = self._system_stats()
         ap["system"].update(self._lte_signal_stats())
         # Derived ages (computed server-side)
         now_m = monotonic_s()
@@ -467,12 +472,12 @@ class OnicsController:
             self._fail_events_60s.popleft()
 
     @staticmethod
-    def _system_stats() -> Dict[str, Any]:
-        stats: Dict[str, Any] = {
+    def _blank_system_stats() -> Dict[str, Any]:
+        return {
             "load_1": None,
             "load_5": None,
             "load_15": None,
-            "cpu_count": os.cpu_count() or 0,
+            "cpu_count": None,
             "mem_total_bytes": None,
             "mem_available_bytes": None,
             "mem_used_bytes": None,
@@ -481,67 +486,138 @@ class OnicsController:
             "disk_free_bytes": None,
         }
 
-        try:
-            load_1, load_5, load_15 = os.getloadavg()
-            stats["load_1"] = load_1
-            stats["load_5"] = load_5
-            stats["load_15"] = load_15
-        except (AttributeError, OSError):
-            pass
+    @classmethod
+    def _parse_remote_system_output(cls, output: str) -> Dict[str, Any]:
+        stats = cls._blank_system_stats()
+        parts = output.split("\n---\n")
+        if len(parts) < 4:
+            return stats
+
+        load_line = parts[0].strip().splitlines()
+        if load_line:
+            load_parts = load_line[0].split()
+            if len(load_parts) >= 3:
+                try:
+                    stats["load_1"] = float(load_parts[0])
+                    stats["load_5"] = float(load_parts[1])
+                    stats["load_15"] = float(load_parts[2])
+                except ValueError:
+                    pass
 
         mem_total = None
         mem_available = None
         meminfo_values: Dict[str, int] = {}
-        try:
-            with open("/proc/meminfo", "r", encoding="utf-8") as meminfo:
-                for line in meminfo:
-                    parts = line.split()
-                    if len(parts) < 2:
-                        continue
-                    key = parts[0].rstrip(":")
-                    try:
-                        value = int(parts[1])
-                    except ValueError:
-                        continue
-                    meminfo_values[key] = value
-                    if key == "MemTotal":
-                        mem_total = value * 1024
-                    elif key == "MemAvailable":
-                        mem_available = value * 1024
-            if mem_available is None:
-                mem_free = meminfo_values.get("MemFree")
-                buffers = meminfo_values.get("Buffers")
-                cached = meminfo_values.get("Cached")
-                shmem = meminfo_values.get("Shmem", 0)
-                reclaimable = meminfo_values.get("SReclaimable", 0)
-                if mem_free is not None and buffers is not None and cached is not None:
-                    mem_available = max(
-                        (mem_free + buffers + cached + reclaimable - shmem) * 1024, 0
-                    )
-            if mem_total is not None:
-                stats["mem_total_bytes"] = mem_total
-            if (
-                mem_total is not None
-                and mem_available is not None
-                and mem_available > mem_total
-            ):
-                mem_available = None
-            if mem_available is not None:
-                stats["mem_available_bytes"] = mem_available
-            if mem_total is not None and mem_available is not None:
-                stats["mem_used_bytes"] = max(mem_total - mem_available, 0)
-        except (OSError, ValueError):
-            pass
+        for line in parts[1].splitlines():
+            items = line.split()
+            if len(items) < 2:
+                continue
+            key = items[0].rstrip(":")
+            try:
+                value = int(items[1])
+            except ValueError:
+                continue
+            meminfo_values[key] = value
+            if key == "MemTotal":
+                mem_total = value * 1024
+            elif key == "MemAvailable":
+                mem_available = value * 1024
 
-        try:
-            disk = shutil.disk_usage("/")
-            stats["disk_total_bytes"] = disk.total
-            stats["disk_used_bytes"] = disk.used
-            stats["disk_free_bytes"] = disk.free
-        except OSError:
-            pass
+        if mem_available is None:
+            mem_free = meminfo_values.get("MemFree")
+            buffers = meminfo_values.get("Buffers")
+            cached = meminfo_values.get("Cached")
+            shmem = meminfo_values.get("Shmem", 0)
+            reclaimable = meminfo_values.get("SReclaimable", 0)
+            if mem_free is not None and buffers is not None and cached is not None:
+                mem_available = max((mem_free + buffers + cached + reclaimable - shmem) * 1024, 0)
+
+        if mem_total is not None:
+            stats["mem_total_bytes"] = mem_total
+        if mem_total is not None and mem_available is not None and mem_available > mem_total:
+            mem_available = None
+        if mem_available is not None:
+            stats["mem_available_bytes"] = mem_available
+        if mem_total is not None and mem_available is not None:
+            stats["mem_used_bytes"] = max(mem_total - mem_available, 0)
+
+        df_lines = [line for line in parts[2].splitlines() if line.strip()]
+        if df_lines:
+            columns = df_lines[-1].split()
+            if len(columns) >= 4:
+                try:
+                    stats["disk_total_bytes"] = int(columns[1])
+                    stats["disk_used_bytes"] = int(columns[2])
+                    stats["disk_free_bytes"] = int(columns[3])
+                except ValueError:
+                    pass
+
+        cpu_line = parts[3].strip().splitlines()
+        if cpu_line:
+            try:
+                stats["cpu_count"] = int(cpu_line[0].strip())
+            except ValueError:
+                pass
 
         return stats
+
+    def _fetch_remote_system_stats(self, client: paramiko.SSHClient) -> Dict[str, Any]:
+        cmd = (
+            "sh -c '"
+            "cat /proc/loadavg 2>/dev/null; "
+            "echo \"---\"; "
+            "cat /proc/meminfo 2>/dev/null; "
+            "echo \"---\"; "
+            "df -B1 / 2>/dev/null | tail -n 1; "
+            "echo \"---\"; "
+            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0'"
+        )
+        _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
+        output = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        _ = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+        if err:
+            output = output + ("\n" if output else "") + err
+        return self._parse_remote_system_output(output)
+
+    def _system_stats_check(self) -> None:
+        now_m = monotonic_s()
+        if now_m < self._system_backoff_until:
+            return
+
+        client: Optional[paramiko.SSHClient]
+        created = False
+        with self._lock:
+            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
+
+        if client is None:
+            client, err, _ms = self._ssh_connect()
+            if client is None:
+                self._mark_failure()
+                self._handle_ssh_failure(err)
+                if self._system_backoff_s <= 0.0:
+                    self._system_backoff_s = max(3.0, SYSTEM_STATS_CHECK_S)
+                else:
+                    self._system_backoff_s = min(self._system_backoff_s * 2.0, 60.0)
+                self._system_backoff_until = monotonic_s() + self._system_backoff_s
+                with self._lock:
+                    self._autopilot.system = self._blank_system_stats()
+                return
+            created = True
+
+        stats = self._blank_system_stats()
+        try:
+            stats = self._fetch_remote_system_stats(client)
+        finally:
+            if created and client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+
+        with self._lock:
+            self._autopilot.system = stats
+        self._system_backoff_s = 0.0
+        self._system_backoff_until = 0.0
 
     @staticmethod
     def _parse_lte_rssi(output: str) -> Optional[float]:
@@ -860,6 +936,10 @@ class OnicsController:
         if (now_m - self._last_service_check) >= SERVICE_CHECK_S:
             self._last_service_check = now_m
             self._services_check()
+
+        if (now_m - self._last_system_check) >= SYSTEM_STATS_CHECK_S:
+            self._last_system_check = now_m
+            self._system_stats_check()
 
         # Compute stale/LOS and stability score.
         with self._lock:
