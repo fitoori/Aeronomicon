@@ -625,10 +625,11 @@ class OnicsController:
         for idx, line in enumerate(lines):
             if "RSSI:" not in line:
                 continue
-            for follow in lines[idx + 1 : idx + 4]:
-                match = re.search(r"'(?P<rssi>-?\d+(?:\.\d+)?) dBm'", follow)
-                if match:
-                    return float(match.group("rssi"))
+            if idx + 1 >= len(lines):
+                return None
+            match = re.search(r"'(?P<rssi>-?\d+(?:\.\d+)?) dBm'", lines[idx + 1])
+            if match:
+                return float(match.group("rssi"))
         return None
 
     def _lte_signal_stats(self) -> Dict[str, Any]:
@@ -665,13 +666,13 @@ class OnicsController:
 
         output = (proc.stdout or "") + (proc.stderr or "")
         if proc.returncode != 0:
-            stats["lte_signal_error"] = f"qmicli failed ({proc.returncode})."
+            stats["lte_signal_error"] = f"qmicli failed with exit code {proc.returncode}."
             self._lte_signal_cache = stats
             return dict(stats)
 
         rssi = self._parse_lte_rssi(output)
         if rssi is None:
-            stats["lte_signal_error"] = "RSSI not found."
+            stats["lte_signal_error"] = "Could not parse RSSI."
             self._lte_signal_cache = stats
             return dict(stats)
 
