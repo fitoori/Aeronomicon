@@ -321,6 +321,8 @@ class OnicsController:
         self._last_service_check = 0.0
         self._last_lte_check = 0.0
         self._lte_signal_cache: Dict[str, Any] = {}
+        self._service_backoff_until = 0.0
+        self._service_backoff_s = 0.0
 
     # --- Logging & publishing
 
@@ -412,13 +414,13 @@ class OnicsController:
         else:
             self._set_login_prompt(False, "")
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self, *, include_logs: bool = True) -> Dict[str, Any]:
         hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
         with self._lock:
             rt = dataclasses.asdict(self._runtime)
             hl = dataclasses.asdict(self._health)
             ap = dataclasses.asdict(self._autopilot)
-            logs = list(self._logs)[-MAX_LOG_LINES:]
+            logs = list(self._logs)[-MAX_LOG_LINES:] if include_logs else []
         ap["system"] = self._system_stats()
         ap["system"].update(self._lte_signal_stats())
         # Derived ages (computed server-side)
@@ -454,7 +456,7 @@ class OnicsController:
         }
 
     def publish_status(self) -> None:
-        self._broker.publish("status", self.snapshot())
+        self._broker.publish("status", self.snapshot(include_logs=False))
 
     # --- Health checks
 
@@ -760,6 +762,9 @@ class OnicsController:
         }
 
     def _services_check(self) -> None:
+        now_m = monotonic_s()
+        if now_m < self._service_backoff_until:
+            return
         updates: Dict[str, Dict[str, Any]] = {}
         with self._lock:
             service_units = {
@@ -778,6 +783,11 @@ class OnicsController:
             if client is None:
                 self._mark_failure()
                 self._handle_ssh_failure(err)
+                if self._service_backoff_s <= 0.0:
+                    self._service_backoff_s = max(3.0, SERVICE_CHECK_S)
+                else:
+                    self._service_backoff_s = min(self._service_backoff_s * 2.0, 60.0)
+                self._service_backoff_until = monotonic_s() + self._service_backoff_s
                 for key, unit in service_units.items():
                     updates[key] = {
                         "unit": unit,
@@ -804,6 +814,8 @@ class OnicsController:
         with self._lock:
             for key, value in updates.items():
                 self._autopilot.services[key] = value
+        self._service_backoff_s = 0.0
+        self._service_backoff_until = 0.0
 
     def health_tick(self) -> None:
         now_m = monotonic_s()
@@ -1052,6 +1064,23 @@ class OnicsController:
                 self._append_log("STOP FAILED: No PID available (pidfile missing/unreadable)")
                 self._set_state("ERROR", "No PID available to stop ONICS-T")
                 return False, "No PID available"
+
+            expected_script = os.path.basename(REMOTE_ONICS_T_PATH)
+            try:
+                check_cmd = f"bash -lc 'ps -p {pid} -o args= 2>/dev/null || true'"
+                _stdin, stdout, _stderr = client.exec_command(check_cmd, get_pty=False)
+                args = stdout.read().decode("utf-8", errors="replace").strip()
+            except Exception as e:
+                args = ""
+                self._append_log(f"STOP WARNING: could not verify PID {pid}: {e}")
+
+            if not args or expected_script not in args:
+                self._append_log(
+                    f"STOP FAILED: PID {pid} does not look like ONICS-T "
+                    f"(expected '{expected_script}', got '{args or 'no process'}')"
+                )
+                self._set_state("ERROR", "PID mismatch; refusing to stop")
+                return False, "PID mismatch"
 
             # Execute an escalated stop sequence, bounded in time.
             stop_cmd = (
