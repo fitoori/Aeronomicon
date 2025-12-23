@@ -39,6 +39,7 @@ const lteSignalStatus = document.getElementById("lte-signal-status");
 const lteSignalMeta = document.getElementById("lte-signal-meta");
 const systemLoad = document.getElementById("system-load");
 const systemLoadMeta = document.getElementById("system-load-meta");
+const systemLoadGraph = document.getElementById("system-load-graph");
 const systemMemory = document.getElementById("system-memory");
 const systemMemoryMeta = document.getElementById("system-memory-meta");
 const systemDisk = document.getElementById("system-disk");
@@ -201,6 +202,89 @@ function formatBytes(value) {
 
 function formatUptime(seconds) {
   return formatSeconds(seconds);
+}
+
+const loadHistory = [];
+const loadHistoryWindowMs = 5 * 60 * 1000;
+let loadHistoryCpuCount = null;
+let loadGraphContext = systemLoadGraph ? systemLoadGraph.getContext("2d") : null;
+
+function pruneLoadHistory(nowMs) {
+  const cutoff = nowMs - loadHistoryWindowMs;
+  while (loadHistory.length && loadHistory[0].ts < cutoff) {
+    loadHistory.shift();
+  }
+}
+
+function resizeLoadGraph() {
+  if (!systemLoadGraph || !loadGraphContext) {
+    return;
+  }
+  const { clientWidth, clientHeight } = systemLoadGraph;
+  if (!clientWidth || !clientHeight) {
+    return;
+  }
+  const dpr = window.devicePixelRatio || 1;
+  systemLoadGraph.width = Math.round(clientWidth * dpr);
+  systemLoadGraph.height = Math.round(clientHeight * dpr);
+  loadGraphContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function drawLoadGraph() {
+  if (!systemLoadGraph || !loadGraphContext) {
+    return;
+  }
+  const now = Date.now();
+  pruneLoadHistory(now);
+  resizeLoadGraph();
+
+  const width = systemLoadGraph.clientWidth;
+  const height = systemLoadGraph.clientHeight;
+  if (!width || !height) {
+    return;
+  }
+
+  loadGraphContext.clearRect(0, 0, width, height);
+
+  if (!loadHistory.length) {
+    return;
+  }
+
+  const maxLoad = Math.max(
+    1,
+    loadHistoryCpuCount || 0,
+    ...loadHistory.map((entry) => entry.value)
+  );
+  const paddedMax = maxLoad * 1.1;
+  const start = now - loadHistoryWindowMs;
+
+  loadGraphContext.strokeStyle = "rgba(74, 222, 128, 0.85)";
+  loadGraphContext.lineWidth = 2;
+  loadGraphContext.beginPath();
+
+  loadHistory.forEach((entry, index) => {
+    const x = ((entry.ts - start) / loadHistoryWindowMs) * width;
+    const y = height - Math.min(entry.value / paddedMax, 1) * height;
+    if (index === 0) {
+      loadGraphContext.moveTo(x, y);
+    } else {
+      loadGraphContext.lineTo(x, y);
+    }
+  });
+
+  loadGraphContext.stroke();
+}
+
+function recordLoadPoint(value, cpuCount) {
+  if (!Number.isFinite(value)) {
+    return;
+  }
+  if (Number.isFinite(cpuCount)) {
+    loadHistoryCpuCount = cpuCount;
+  }
+  loadHistory.push({ ts: Date.now(), value: Number(value) });
+  pruneLoadHistory(Date.now());
+  drawLoadGraph();
 }
 
 function formatSystemSummary(system) {
@@ -609,6 +693,9 @@ function updateSnapshot(snapshot) {
         ? `CPU cores: ${system.cpu_count}`
         : "CPU core count unavailable.";
     }
+    if (system.load_1 !== null && system.load_1 !== undefined) {
+      recordLoadPoint(system.load_1, system.cpu_count);
+    }
 
     if (systemMemory) {
       if (system.mem_total_bytes !== null && system.mem_total_bytes !== undefined) {
@@ -758,6 +845,15 @@ eventSource.onerror = () => {
   connectionPill.style.borderColor = "rgba(249,115,22,0.6)";
   connectionPill.style.color = "#f97316";
 };
+
+if (systemLoadGraph) {
+  const resizeObserver = new ResizeObserver(() => {
+    drawLoadGraph();
+  });
+  resizeObserver.observe(systemLoadGraph);
+  window.addEventListener("resize", drawLoadGraph);
+  setInterval(drawLoadGraph, 1000);
+}
 
 fetch("/api/snapshot")
   .then((res) => res.json())

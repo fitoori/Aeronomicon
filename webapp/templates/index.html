@@ -204,6 +204,13 @@
               <div class="health-card" id="system-load-card">
                 <h3>System Load</h3>
                 <p class="health-card__value" id="system-load">-</p>
+                <div class="health-card__chart">
+                  <canvas
+                    id="system-load-graph"
+                    aria-label="System load history for the last 5 minutes"
+                    role="img"
+                  ></canvas>
+                </div>
                 <p class="health-card__meta" id="system-load-meta">CPU core count unavailable.</p>
               </div>
               <div class="health-card" id="system-memory-card">
