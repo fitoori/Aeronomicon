@@ -46,7 +46,7 @@ body {
 .shell__brand {
   display: flex;
   gap: 16px;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .shell__logo-wrap {
@@ -86,6 +86,28 @@ body {
   color: var(--muted);
   margin: 0;
   line-height: 1.4;
+}
+
+.shell__stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  flex: 1;
+}
+
+.shell__stat-card {
+  padding: 10px 12px;
+}
+
+.shell__stat-card h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.shell__stat-card .health-card__value {
+  font-size: 0.95rem;
 }
 
 .shell__status {

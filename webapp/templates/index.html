@@ -59,7 +59,24 @@
               class="shell__logo"
             />
           </div>
-          <p class="shell__meta" id="app-meta">Awaiting link...</p>
+          <div class="shell__stats" aria-label="System statistics">
+            <div class="health-card shell__stat-card">
+              <h3>Load Avg</h3>
+              <p class="health-card__value" id="header-load">n/a</p>
+            </div>
+            <div class="health-card shell__stat-card">
+              <h3>Memory Free</h3>
+              <p class="health-card__value" id="header-memory">n/a</p>
+            </div>
+            <div class="health-card shell__stat-card">
+              <h3>Disk Free</h3>
+              <p class="health-card__value" id="header-disk">n/a</p>
+            </div>
+            <div class="health-card shell__stat-card">
+              <h3>Uptime</h3>
+              <p class="health-card__value" id="header-uptime">n/a</p>
+            </div>
+          </div>
         </div>
         <div class="shell__status" id="connection-pill">LINK: INIT</div>
       </header>
