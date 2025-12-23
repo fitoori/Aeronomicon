@@ -34,6 +34,9 @@ const mavproxyStatus = document.getElementById("mavproxy-status");
 const mavproxyMeta = document.getElementById("mavproxy-meta");
 const uplinkStatus = document.getElementById("uplink-status");
 const uplinkMeta = document.getElementById("uplink-meta");
+const lteSignalValue = document.getElementById("lte-signal-value");
+const lteSignalStatus = document.getElementById("lte-signal-status");
+const lteSignalMeta = document.getElementById("lte-signal-meta");
 const systemLoad = document.getElementById("system-load");
 const systemLoadMeta = document.getElementById("system-load-meta");
 const systemMemory = document.getElementById("system-memory");
@@ -59,6 +62,7 @@ const cards = {
   arducopter: document.getElementById("arducopter-card"),
   mavproxy: document.getElementById("mavproxy-card"),
   uplink: document.getElementById("uplink-card"),
+  lteSignal: document.getElementById("lte-signal-card"),
   systemLoad: document.getElementById("system-load-card"),
   systemMemory: document.getElementById("system-memory-card"),
   systemDisk: document.getElementById("system-disk-card"),
@@ -543,6 +547,34 @@ function updateSnapshot(snapshot) {
 
   if (autopilot && autopilot.system) {
     const system = autopilot.system;
+    if (lteSignalValue) {
+      if (Number.isFinite(system.lte_signal_percent)) {
+        lteSignalValue.textContent = `${Math.round(system.lte_signal_percent)}%`;
+      } else {
+        lteSignalValue.textContent = "n/a";
+      }
+    }
+    if (lteSignalStatus) {
+      lteSignalStatus.textContent = Number.isFinite(system.lte_signal_percent)
+        ? "Signal strength"
+        : "Unavailable";
+    }
+    if (lteSignalMeta) {
+      lteSignalMeta.textContent = Number.isFinite(system.lte_signal_percent)
+        ? Number.isFinite(system.lte_rssi_dbm)
+          ? `RSSI ${system.lte_rssi_dbm} dBm`
+          : "RSSI unavailable."
+        : system.lte_signal_error || "LTE signal unavailable.";
+    }
+    if (cards.lteSignal) {
+      if (Number.isFinite(system.lte_signal_percent)) {
+        const percent = Number(system.lte_signal_percent);
+        const state = percent >= 70 ? "ok" : percent >= 40 ? "warn" : "danger";
+        setCardState(cards.lteSignal, state);
+      } else {
+        setCardState(cards.lteSignal, "warn");
+      }
+    }
     if (headerLoad) {
       headerLoad.textContent =
         system.load_1 !== null && system.load_5 !== null && system.load_15 !== null
