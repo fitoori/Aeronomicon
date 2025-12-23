@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ONICS-T Webapp Watchdog
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=15
+Unit=webapp-watchdog.service
+
+[Install]
+WantedBy=timers.target

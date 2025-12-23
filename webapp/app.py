@@ -1246,6 +1246,11 @@ def api_snapshot() -> Response:
     return jsonify(controller.snapshot())
 
 
+@app.get("/api/health")
+def api_health() -> Response:
+    return jsonify({"ok": True, "ts": time.time()})
+
+
 @app.post("/api/engage")
 def api_engage() -> Response:
     ok, msg = controller.start_onics()
