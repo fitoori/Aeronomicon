@@ -491,15 +491,41 @@ class OnicsController:
 
         mem_total = None
         mem_available = None
+        meminfo_values: Dict[str, int] = {}
         try:
             with open("/proc/meminfo", "r", encoding="utf-8") as meminfo:
                 for line in meminfo:
-                    if line.startswith("MemTotal:"):
-                        mem_total = int(line.split()[1]) * 1024
-                    elif line.startswith("MemAvailable:"):
-                        mem_available = int(line.split()[1]) * 1024
+                    parts = line.split()
+                    if len(parts) < 2:
+                        continue
+                    key = parts[0].rstrip(":")
+                    try:
+                        value = int(parts[1])
+                    except ValueError:
+                        continue
+                    meminfo_values[key] = value
+                    if key == "MemTotal":
+                        mem_total = value * 1024
+                    elif key == "MemAvailable":
+                        mem_available = value * 1024
+            if mem_available is None:
+                mem_free = meminfo_values.get("MemFree")
+                buffers = meminfo_values.get("Buffers")
+                cached = meminfo_values.get("Cached")
+                shmem = meminfo_values.get("Shmem", 0)
+                reclaimable = meminfo_values.get("SReclaimable", 0)
+                if mem_free is not None and buffers is not None and cached is not None:
+                    mem_available = max(
+                        (mem_free + buffers + cached + reclaimable - shmem) * 1024, 0
+                    )
             if mem_total is not None:
                 stats["mem_total_bytes"] = mem_total
+            if (
+                mem_total is not None
+                and mem_available is not None
+                and mem_available > mem_total
+            ):
+                mem_available = None
             if mem_available is not None:
                 stats["mem_available_bytes"] = mem_available
             if mem_total is not None and mem_available is not None:
