@@ -45,8 +45,11 @@ const systemMemoryMeta = document.getElementById("system-memory-meta");
 const systemDisk = document.getElementById("system-disk");
 const systemDiskMeta = document.getElementById("system-disk-meta");
 const headerLoad = document.getElementById("header-load");
+const headerLoadGraph = document.getElementById("header-load-graph");
 const headerMemory = document.getElementById("header-memory");
 const headerDisk = document.getElementById("header-disk");
+const pinSectionSelect = document.getElementById("pin-section-select");
+const pinHost = document.getElementById("pin-host");
 
 let engageToggleAction = null;
 
@@ -203,7 +206,13 @@ function formatUptime(seconds) {
 const loadHistory = [];
 const loadHistoryWindowMs = 5 * 60 * 1000;
 let loadHistoryCpuCount = null;
-let loadGraphContext = systemLoadGraph ? systemLoadGraph.getContext("2d") : null;
+const loadGraphs = [systemLoadGraph, headerLoadGraph]
+  .filter(Boolean)
+  .map((canvas) => ({
+    canvas,
+    context: canvas.getContext("2d"),
+  }))
+  .filter((graph) => graph.context);
 
 function pruneLoadHistory(nowMs) {
   const cutoff = nowMs - loadHistoryWindowMs;
@@ -212,35 +221,35 @@ function pruneLoadHistory(nowMs) {
   }
 }
 
-function resizeLoadGraph() {
-  if (!systemLoadGraph || !loadGraphContext) {
+function resizeLoadGraph(graph) {
+  if (!graph?.canvas || !graph?.context) {
     return;
   }
-  const { clientWidth, clientHeight } = systemLoadGraph;
+  const { clientWidth, clientHeight } = graph.canvas;
   if (!clientWidth || !clientHeight) {
     return;
   }
   const dpr = window.devicePixelRatio || 1;
-  systemLoadGraph.width = Math.round(clientWidth * dpr);
-  systemLoadGraph.height = Math.round(clientHeight * dpr);
-  loadGraphContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+  graph.canvas.width = Math.round(clientWidth * dpr);
+  graph.canvas.height = Math.round(clientHeight * dpr);
+  graph.context.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function drawLoadGraph() {
-  if (!systemLoadGraph || !loadGraphContext) {
+function drawLoadGraph(graph) {
+  if (!graph?.canvas || !graph?.context) {
     return;
   }
   const now = Date.now();
   pruneLoadHistory(now);
-  resizeLoadGraph();
+  resizeLoadGraph(graph);
 
-  const width = systemLoadGraph.clientWidth;
-  const height = systemLoadGraph.clientHeight;
+  const width = graph.canvas.clientWidth;
+  const height = graph.canvas.clientHeight;
   if (!width || !height) {
     return;
   }
 
-  loadGraphContext.clearRect(0, 0, width, height);
+  graph.context.clearRect(0, 0, width, height);
 
   if (!loadHistory.length) {
     return;
@@ -254,21 +263,27 @@ function drawLoadGraph() {
   const paddedMax = maxLoad * 1.1;
   const start = now - loadHistoryWindowMs;
 
-  loadGraphContext.strokeStyle = "rgba(74, 222, 128, 0.85)";
-  loadGraphContext.lineWidth = 2;
-  loadGraphContext.beginPath();
+  graph.context.strokeStyle = "rgba(74, 222, 128, 0.85)";
+  graph.context.lineWidth = 2;
+  graph.context.beginPath();
 
   loadHistory.forEach((entry, index) => {
     const x = ((entry.ts - start) / loadHistoryWindowMs) * width;
     const y = height - Math.min(entry.value / paddedMax, 1) * height;
     if (index === 0) {
-      loadGraphContext.moveTo(x, y);
+      graph.context.moveTo(x, y);
     } else {
-      loadGraphContext.lineTo(x, y);
+      graph.context.lineTo(x, y);
     }
   });
 
-  loadGraphContext.stroke();
+  graph.context.stroke();
+}
+
+function drawAllLoadGraphs() {
+  loadGraphs.forEach((graph) => {
+    drawLoadGraph(graph);
+  });
 }
 
 function recordLoadPoint(value, cpuCount) {
@@ -280,7 +295,69 @@ function recordLoadPoint(value, cpuCount) {
   }
   loadHistory.push({ ts: Date.now(), value: Number(value) });
   pruneLoadHistory(Date.now());
-  drawLoadGraph();
+  drawAllLoadGraphs();
+}
+
+const pinSections = new Map();
+let currentPinnedSection = null;
+
+function setupPinSections() {
+  if (!pinHost) {
+    return;
+  }
+  document.querySelectorAll("[data-pin-section]").forEach((section) => {
+    const key = section.getAttribute("data-pin-section");
+    if (!key) {
+      return;
+    }
+    const placeholder = document.createElement("span");
+    placeholder.className = "pin-placeholder";
+    placeholder.setAttribute("aria-hidden", "true");
+    section.after(placeholder);
+    pinSections.set(key, {
+      element: section,
+      placeholder,
+    });
+  });
+}
+
+function restoreSection(key) {
+  const entry = pinSections.get(key);
+  if (!entry) {
+    return;
+  }
+  const { element, placeholder } = entry;
+  if (placeholder.parentElement) {
+    placeholder.parentElement.insertBefore(element, placeholder);
+  }
+}
+
+function pinSection(key) {
+  if (!pinHost || !pinSections.has(key)) {
+    return;
+  }
+  if (currentPinnedSection && currentPinnedSection !== key) {
+    restoreSection(currentPinnedSection);
+  }
+  const entry = pinSections.get(key);
+  pinHost.appendChild(entry.element);
+  currentPinnedSection = key;
+}
+
+function applyPinnedSection(value) {
+  const key = value || "tailscale";
+  if (!pinSections.has(key)) {
+    return;
+  }
+  pinSection(key);
+  if (pinSectionSelect) {
+    pinSectionSelect.value = key;
+  }
+  try {
+    localStorage.setItem("pinnedSection", key);
+  } catch (err) {
+    console.warn("Unable to persist pinned section", err);
+  }
 }
 
 function formatSystemSummary(system) {
@@ -831,13 +908,34 @@ eventSource.onerror = () => {
   connectionPill.style.color = "#f97316";
 };
 
-if (systemLoadGraph) {
-  const resizeObserver = new ResizeObserver(() => {
-    drawLoadGraph();
+setupPinSections();
+
+if (pinSectionSelect) {
+  const saved = (() => {
+    try {
+      return localStorage.getItem("pinnedSection");
+    } catch (err) {
+      return null;
+    }
+  })();
+  const initial = saved || pinSectionSelect.value;
+  applyPinnedSection(initial);
+  pinSectionSelect.addEventListener("change", (event) => {
+    applyPinnedSection(event.target.value);
   });
-  resizeObserver.observe(systemLoadGraph);
-  window.addEventListener("resize", drawLoadGraph);
-  setInterval(drawLoadGraph, 1000);
+} else {
+  applyPinnedSection("tailscale");
+}
+
+if (loadGraphs.length) {
+  const resizeObserver = new ResizeObserver(() => {
+    drawAllLoadGraphs();
+  });
+  loadGraphs.forEach((graph) => {
+    resizeObserver.observe(graph.canvas);
+  });
+  window.addEventListener("resize", drawAllLoadGraphs);
+  setInterval(drawAllLoadGraphs, 1000);
 }
 
 fetch("/api/snapshot")

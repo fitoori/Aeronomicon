@@ -60,8 +60,11 @@
             />
           </div>
           <div class="shell__stats" aria-label="System statistics">
-            <div class="health-card shell__stat-card">
+            <div class="health-card shell__stat-card load-card">
               <h3>Load Avg</h3>
+              <div class="load-graph load-graph--header" aria-hidden="true">
+                <canvas id="header-load-graph" role="img" aria-label="System load history"></canvas>
+              </div>
               <p class="health-card__value" id="header-load">n/a</p>
             </div>
             <div class="health-card shell__stat-card">
@@ -105,8 +108,23 @@
         </article>
       </section>
 
+      <section class="pin-area">
+          <div class="pin-area__controls">
+            <h2>Pin Top Section</h2>
+            <div class="pin-area__control">
+              <label for="pin-section-select">Pinned</label>
+              <select id="pin-section-select" class="pin-area__select">
+                <option value="tailscale">Tailnet Health</option>
+                <option value="system">System Resources</option>
+                <option value="autopilot">Autopilot Telemetry</option>
+              </select>
+            </div>
+          </div>
+          <div class="pin-host" id="pin-host"></div>
+        </section>
+
       <section class="toolbar-grid">
-        <article class="panel">
+        <article class="panel" data-pin-section="autopilot" id="autopilot-section">
           <header class="panel__header">
             <h2>Vehicle Telemetry</h2>
           </header>
@@ -134,7 +152,7 @@
           </div>
         </article>
 
-        <article class="toolbar" id="health-panel">
+        <article class="toolbar" id="health-panel" data-pin-section="tailscale">
           <div class="toolbar__header">
             <h2>Tailnet Health</h2>
           </div>
@@ -197,16 +215,26 @@
               </div>
             </div>
             <div class="health-grid">
-              <div class="health-card" id="system-load-card">
+            </div>
+          </div>
+        </article>
+
+        <article class="panel" data-pin-section="system" id="system-section">
+          <header class="panel__header">
+            <h2>System Resources</h2>
+          </header>
+          <div class="panel__body">
+            <div class="health-grid">
+              <div class="health-card load-card" id="system-load-card">
                 <h3>System Load</h3>
-                <p class="health-card__value" id="system-load">-</p>
-                <div class="health-card__chart">
+                <div class="load-graph" aria-hidden="true">
                   <canvas
                     id="system-load-graph"
                     aria-label="System load history for the last 5 minutes"
                     role="img"
                   ></canvas>
                 </div>
+                <p class="health-card__value" id="system-load">-</p>
                 <p class="health-card__meta" id="system-load-meta">CPU core count unavailable.</p>
               </div>
               <div class="health-card" id="system-memory-card">
