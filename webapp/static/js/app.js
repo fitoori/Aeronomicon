@@ -150,6 +150,26 @@ function formatUptime(seconds) {
   return `${mins}m`;
 }
 
+function formatSystemSummary(system) {
+  if (!system) {
+    return "System telemetry unavailable.";
+  }
+  const load =
+    system.load_1 !== null && system.load_5 !== null && system.load_15 !== null
+      ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
+      : "n/a";
+  const mem =
+    system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
+      ? `${formatBytes(system.mem_available_bytes)} free`
+      : "n/a";
+  const disk =
+    system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
+      ? `${formatBytes(system.disk_free_bytes)} free`
+      : "n/a";
+  const uptime = formatUptime(system.uptime_s);
+  return `Load ${load} · Mem ${mem} · Disk ${disk} · Uptime ${uptime}`;
+}
+
 function updateEngageToggle(onics) {
   if (!engageToggleBtn) {
     return;
@@ -337,8 +357,7 @@ function updateSnapshot(snapshot) {
   }
 
   const { meta, health, onics, autopilot } = snapshot;
-  const metaLine = `${meta.hostname} · ${meta.ssh_user}@${meta.hostname}:${meta.ssh_port}`;
-  appMeta.textContent = metaLine;
+  appMeta.textContent = formatSystemSummary(autopilot?.system);
   setLoginPrompt(meta, onics);
 
   const linkDegraded =
