@@ -89,10 +89,69 @@ function pulseCard(card) {
 }
 
 function formatAge(value) {
-  if (value === null || value === undefined) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
     return "n/a";
   }
-  return `${value.toFixed(1)}s`;
+  const seconds = Math.max(0, Number(value));
+  const rounded = seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toString();
+  return `${rounded} seconds ago`;
+}
+
+function formatSeconds(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "n/a";
+  }
+  const seconds = Math.max(0, Math.floor(Number(value)));
+  return `${seconds} seconds`;
+}
+
+function normalizeTimestamp(ts) {
+  if (!ts) {
+    return null;
+  }
+  const trimmed = String(ts).trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+}
+
+function timestampToMs(ts) {
+  const normalized = normalizeTimestamp(ts);
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Date.parse(normalized);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  return parsed;
+}
+
+function ageSecondsFromTimestamp(ts) {
+  const ms = timestampToMs(ts);
+  if (ms === null) {
+    return null;
+  }
+  return Math.max(0, (Date.now() - ms) / 1000);
+}
+
+function setAgeSeverity(element, ageSeconds) {
+  if (!element) {
+    return;
+  }
+  element.classList.remove("age--yellow", "age--orange", "age--red");
+  if (ageSeconds === null || ageSeconds === undefined || !Number.isFinite(Number(ageSeconds))) {
+    return;
+  }
+  const seconds = Number(ageSeconds);
+  if (seconds >= 30) {
+    element.classList.add("age--red");
+  } else if (seconds >= 20) {
+    element.classList.add("age--orange");
+  } else if (seconds >= 10) {
+    element.classList.add("age--yellow");
+  }
 }
 
 function formatServiceStatus(status) {
@@ -137,20 +196,38 @@ function formatBytes(value) {
 }
 
 function formatUptime(seconds) {
-  if (seconds === null || seconds === undefined) {
-    return "n/a";
+  return formatSeconds(seconds);
+}
+
+function formatSystemSummary(system) {
+  if (!system) {
+    return "System telemetry unavailable.";
   }
-  const total = Math.floor(seconds);
-  const days = Math.floor(total / 86400);
-  const hours = Math.floor((total % 86400) / 3600);
-  const mins = Math.floor((total % 3600) / 60);
-  if (days > 0) {
-    return `${days}d ${hours}h ${mins}m`;
-  }
-  if (hours > 0) {
-    return `${hours}h ${mins}m`;
-  }
-  return `${mins}m`;
+  const load =
+    system.load_1 !== null && system.load_5 !== null && system.load_15 !== null
+      ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
+      : "n/a";
+  const mem =
+    system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
+      ? `${formatBytes(system.mem_available_bytes)} free`
+      : "n/a";
+  const disk =
+    system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
+      ? `${formatBytes(system.disk_free_bytes)} free`
+      : "n/a";
+  const uptime = formatUptime(system.uptime_s);
+  return `Load ${load} · Mem ${mem} · Disk ${disk} · Uptime ${uptime}`;
+}
+
+function formatHeaderReadout(meta, system) {
+  const host = meta?.hostname ? `Host ${meta.hostname}` : "Host unknown";
+  const sshUser = meta?.ssh_user ? meta.ssh_user : "user";
+  const sshPort = meta?.ssh_port ? meta.ssh_port : "22";
+  const sshTarget = meta?.hostname ? `${sshUser}@${meta.hostname}:${sshPort}` : `${sshUser}@host:${sshPort}`;
+  const serverAge = meta?.server_time_iso ? ageSecondsFromTimestamp(meta.server_time_iso) : null;
+  const serverTime = serverAge !== null ? `Server ${formatAge(serverAge)}` : null;
+  const systemSummary = formatSystemSummary(system);
+  return [host, `SSH ${sshTarget}`, serverTime, systemSummary].filter(Boolean).join(" · ");
 }
 
 function updateEngageToggle(onics) {
@@ -204,36 +281,61 @@ const startupStages = [
 ];
 
 function formatTimestamp(ts) {
-  if (!ts) {
-    return "Awaiting telemetry.";
+  const ageSeconds = ageSecondsFromTimestamp(ts);
+  if (ageSeconds === null) {
+    return { text: "Awaiting telemetry.", ageSeconds: null };
   }
-  return `Last update ${ts}`;
+  return { text: `Last update ${formatAge(ageSeconds)}`, ageSeconds };
+}
+
+function formatLogTimestamp(line) {
+  const timestamp = parseLogTimestamp(line);
+  const ageSeconds = ageSecondsFromTimestamp(timestamp);
+  if (ageSeconds === null) {
+    return line;
+  }
+  return line.replace(/^\[[^\]]+\]/, `[${formatAge(ageSeconds)}]`);
 }
 
 function updateTelemetryCards() {
   if (trackingConfidence && trackingMeta) {
     trackingConfidence.textContent =
       telemetryState.trackingConfidence || "Awaiting telemetry";
-    trackingMeta.textContent = telemetryState.trackingTimestamp
-      ? formatTimestamp(telemetryState.trackingTimestamp)
-      : "No tracking updates yet.";
+    if (telemetryState.trackingTimestamp) {
+      const trackingAge = formatTimestamp(telemetryState.trackingTimestamp);
+      trackingMeta.textContent = trackingAge.text;
+      setAgeSeverity(trackingMeta, trackingAge.ageSeconds);
+    } else {
+      trackingMeta.textContent = "No tracking updates yet.";
+      setAgeSeverity(trackingMeta, null);
+    }
     setCardState(cards.tracking, telemetryState.trackingConfidence ? "ok" : null);
   }
 
   if (startupStage && startupMeta) {
     startupStage.textContent = telemetryState.startupStage || "Awaiting telemetry";
-    startupMeta.textContent = telemetryState.startupTimestamp
-      ? formatTimestamp(telemetryState.startupTimestamp)
-      : "No startup milestones yet.";
+    if (telemetryState.startupTimestamp) {
+      const startupAge = formatTimestamp(telemetryState.startupTimestamp);
+      startupMeta.textContent = startupAge.text;
+      setAgeSeverity(startupMeta, startupAge.ageSeconds);
+    } else {
+      startupMeta.textContent = "No startup milestones yet.";
+      setAgeSeverity(startupMeta, null);
+    }
     setCardState(cards.startup, telemetryState.startupStage ? "ok" : null);
   }
 
   if (autopilotAlert && autopilotMeta) {
     autopilotAlert.textContent =
       telemetryState.autopilotMessage || "Awaiting telemetry";
-    autopilotMeta.textContent = telemetryState.autopilotTimestamp
-      ? formatTimestamp(telemetryState.autopilotTimestamp)
-      : "No autopilot alerts yet.";
+    if (telemetryState.autopilotTimestamp) {
+      const autopilotAge = formatTimestamp(telemetryState.autopilotTimestamp);
+      autopilotMeta.textContent = autopilotAge.text;
+      setAgeSeverity(autopilotMeta, autopilotAge.ageSeconds);
+    } else {
+      autopilotMeta.textContent = "No autopilot alerts yet.";
+      setAgeSeverity(autopilotMeta, null);
+    }
     if (telemetryState.autopilotLevel === "CRITICAL") {
       setCardState(cards.autopilot, "danger");
     } else if (telemetryState.autopilotLevel === "WARNING") {
@@ -371,6 +473,7 @@ function updateSnapshot(snapshot) {
     onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
       onics.last_output_age_s
     )}`;
+    setAgeSeverity(onicsRuntime, onics.last_output_age_s);
   }
   if (startupFails) {
     const restartFails = Number.isFinite(onics.restart_failures)
@@ -508,21 +611,8 @@ function updateSnapshot(snapshot) {
       systemUptime.textContent = formatUptime(system.uptime_s);
       systemUptimeMeta.textContent =
         system.uptime_s !== null && system.uptime_s !== undefined
-          ? `Booted ${formatUptime(system.uptime_s)} ago`
-          : "Uptime telemetry unavailable.";
-    }
-  } else {
-    if (headerLoad) {
-      headerLoad.textContent = "n/a";
-    }
-    if (headerMemory) {
-      headerMemory.textContent = "n/a";
-    }
-    if (headerDisk) {
-      headerDisk.textContent = "n/a";
-    }
-    if (headerUptime) {
-      headerUptime.textContent = "n/a";
+        ? `Booted ${formatAge(system.uptime_s)}`
+        : "Uptime telemetry unavailable.";
     }
   }
 
@@ -535,9 +625,11 @@ function updateSnapshot(snapshot) {
 }
 
 function appendLog(line) {
+  parseTelemetry(line);
+  const renderedLine = formatLogTimestamp(line);
   const div = document.createElement("div");
   div.className = "log-line";
-  div.textContent = line;
+  div.textContent = renderedLine;
   logView.prepend(div);
 
   const maxLines = 400;
@@ -545,7 +637,6 @@ function appendLog(line) {
     logView.removeChild(logView.lastChild);
   }
 
-  parseTelemetry(line);
 }
 
 async function sendCommand(path) {

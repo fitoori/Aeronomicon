@@ -9,6 +9,7 @@
   --accent-strong: #22c55e;
   --warning: #f59e0b;
   --danger: #f97316;
+  --critical: #ef4444;
   --ok: #4ade80;
   --muted: #9ca3af;
 }
@@ -331,6 +332,18 @@ body {
   margin: 0.3rem 0 0;
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+.age--yellow {
+  color: #facc15;
+}
+
+.age--orange {
+  color: var(--warning);
+}
+
+.age--red {
+  color: var(--critical);
 }
 
 .startup-fails__value {
