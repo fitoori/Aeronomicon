@@ -1,0 +1,15 @@
+[Unit]
+Description=ONICS-T Webapp
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/Aeronomicon/webapp
+ExecStart=/usr/bin/python3 /home/pi/Aeronomicon/webapp/app.py
+Restart=always
+RestartSec=2
+User=pi
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

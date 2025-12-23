@@ -1,0 +1,8 @@
+[Unit]
+Description=ONICS-T Webapp Watchdog
+After=webapp.service
+Requires=webapp.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/pi/Aeronomicon/util/webapp-watchdog.sh
