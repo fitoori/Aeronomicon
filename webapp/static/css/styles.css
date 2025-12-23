@@ -90,14 +90,16 @@ body {
 }
 
 .shell__stats {
-  display: grid;
+  display: flex;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   flex: 1;
+  flex-wrap: nowrap;
+  align-items: stretch;
 }
 
 .shell__stat-card {
   padding: 10px 12px;
+  flex: 1 1 0;
 }
 
 .shell__stat-card h3 {
@@ -315,6 +317,10 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+}
+
+.system-stats {
+  display: none;
 }
 
 .health-card h3 {
@@ -554,6 +560,14 @@ body {
 
   .shell__header {
     align-items: flex-start;
+  }
+
+  .shell__stats {
+    display: none;
+  }
+
+  .system-stats {
+    display: grid;
   }
 
   .status-strip {
