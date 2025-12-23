@@ -318,6 +318,89 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.load-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.load-card > :not(.load-graph) {
+  position: relative;
+  z-index: 1;
+}
+
+.load-graph {
+  position: absolute;
+  inset: 8px;
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.load-graph--header {
+  inset: 6px;
+  opacity: 0.3;
+}
+
+.load-graph canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.pin-area {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pin-area__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(10, 16, 13, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pin-area__controls h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.pin-area__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pin-area__control label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.pin-area__select {
+  background: rgba(6, 10, 9, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #e5f6ee;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.pin-host {
+  display: grid;
+  gap: 12px;
+}
+
+.pin-placeholder {
+  display: none;
+}
+
 .health-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -352,22 +435,6 @@ body {
   font-size: 0.75rem;
 }
 
-.health-card__chart {
-  margin-top: 0.45rem;
-  height: 72px;
-  width: 100%;
-  border-radius: 8px;
-  background: rgba(4, 12, 9, 0.55);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  padding: 6px;
-  box-sizing: border-box;
-}
-
-.health-card__chart canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
 
 .age--yellow {
   color: #facc15;
