@@ -152,6 +152,13 @@ body {
   padding: 16px 20px 8px;
 }
 
+.panel__header--actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .panel__header h2 {
   margin: 0;
   font-size: 1.15rem;
