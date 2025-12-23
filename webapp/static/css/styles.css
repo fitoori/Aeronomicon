@@ -26,7 +26,8 @@ body {
 .shell {
   max-width: 1120px;
   margin: 0 auto;
-  padding: 20px 20px 32px;
+  padding: calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
+    calc(32px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -478,7 +479,8 @@ body {
 
 @media (max-width: 720px) {
   .shell {
-    padding: 24px 16px 40px;
+    padding: calc(24px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+      calc(40px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
   }
 
   .shell__brand {
