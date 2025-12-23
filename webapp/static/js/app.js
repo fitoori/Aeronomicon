@@ -170,6 +170,16 @@ function formatSystemSummary(system) {
   return `Load ${load} · Mem ${mem} · Disk ${disk} · Uptime ${uptime}`;
 }
 
+function formatHeaderReadout(meta, system) {
+  const host = meta?.hostname ? `Host ${meta.hostname}` : "Host unknown";
+  const sshUser = meta?.ssh_user ? meta.ssh_user : "user";
+  const sshPort = meta?.ssh_port ? meta.ssh_port : "22";
+  const sshTarget = meta?.hostname ? `${sshUser}@${meta.hostname}:${sshPort}` : `${sshUser}@host:${sshPort}`;
+  const serverTime = meta?.server_time_iso ? `Server ${meta.server_time_iso}` : null;
+  const systemSummary = formatSystemSummary(system);
+  return [host, `SSH ${sshTarget}`, serverTime, systemSummary].filter(Boolean).join(" · ");
+}
+
 function updateEngageToggle(onics) {
   if (!engageToggleBtn) {
     return;
@@ -357,15 +367,17 @@ function updateSnapshot(snapshot) {
   }
 
   const { meta, health, onics, autopilot } = snapshot;
-  appMeta.textContent = formatSystemSummary(autopilot?.system);
+  if (appMeta) {
+    appMeta.textContent = formatHeaderReadout(meta, autopilot?.system);
+  }
   setLoginPrompt(meta, onics);
 
   const linkDegraded =
-    health.los ||
-    health.stale ||
-    !health.tailscale_ok ||
-    !health.dns_ok ||
-    !health.tcp_ok;
+    health?.los ||
+    health?.stale ||
+    !health?.tailscale_ok ||
+    !health?.dns_ok ||
+    !health?.tcp_ok;
   connectionPill.textContent = health.los
     ? "LINK: LOS"
     : linkDegraded
@@ -382,10 +394,14 @@ function updateSnapshot(snapshot) {
       ? "#f59e0b"
       : "#4ade80";
 
-  onicsState.textContent = onics.state;
-  onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
-    onics.last_output_age_s
-  )}`;
+  if (onicsState) {
+    onicsState.textContent = onics.state;
+  }
+  if (onicsRuntime) {
+    onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
+      onics.last_output_age_s
+    )}`;
+  }
   if (startupFails) {
     const restartFails = Number.isFinite(onics.restart_failures)
       ? onics.restart_failures
@@ -393,20 +409,32 @@ function updateSnapshot(snapshot) {
     startupFails.textContent = `${restartFails}`;
   }
 
-  tailscaleStatus.textContent = health.tailscale_ok ? "RUNNING" : "OFFLINE";
-  tailscaleMeta.textContent = health.tailscale_error || health.tailscale_backend_state;
+  if (tailscaleStatus) {
+    tailscaleStatus.textContent = health.tailscale_ok ? "RUNNING" : "OFFLINE";
+  }
+  if (tailscaleMeta) {
+    tailscaleMeta.textContent = health.tailscale_error || health.tailscale_backend_state;
+  }
   setCardState(cards.tailscale, health.tailscale_ok ? "ok" : "danger");
 
-  dnsStatus.textContent = health.dns_ok ? "RESOLVED" : "UNRESOLVED";
-  dnsMeta.textContent = health.dns_ok
-    ? `IPs: ${health.dns_ips.join(", ")}`
-    : health.dns_error || "Awaiting DNS";
+  if (dnsStatus) {
+    dnsStatus.textContent = health.dns_ok ? "RESOLVED" : "UNRESOLVED";
+  }
+  if (dnsMeta) {
+    dnsMeta.textContent = health.dns_ok
+      ? `IPs: ${health.dns_ips.join(", ")}`
+      : health.dns_error || "Awaiting DNS";
+  }
   setCardState(cards.dns, health.dns_ok ? "ok" : "warn");
 
-  tcpStatus.textContent = health.tcp_ok ? "CONNECTED" : "BLOCKED";
-  tcpMeta.textContent = health.tcp_ok
-    ? `Probe ${health.tcp_ip}:${meta.ssh_port} ok`
-    : health.tcp_error || "Awaiting TCP";
+  if (tcpStatus) {
+    tcpStatus.textContent = health.tcp_ok ? "CONNECTED" : "BLOCKED";
+  }
+  if (tcpMeta) {
+    tcpMeta.textContent = health.tcp_ok
+      ? `Probe ${health.tcp_ip}:${meta.ssh_port} ok`
+      : health.tcp_error || "Awaiting TCP";
+  }
   setCardState(cards.tcp, health.tcp_ok ? "ok" : "danger");
 
   if (autopilot && autopilot.services) {
@@ -415,16 +443,28 @@ function updateSnapshot(snapshot) {
     const mavproxy = services.mavproxy || {};
     const uplink = services.uplink || {};
 
-    arducopterStatus.textContent = formatServiceStatus(arducopter.status);
-    arducopterMeta.textContent = arducopter.detail || "Awaiting status.";
+    if (arducopterStatus) {
+      arducopterStatus.textContent = formatServiceStatus(arducopter.status);
+    }
+    if (arducopterMeta) {
+      arducopterMeta.textContent = arducopter.detail || "Awaiting status.";
+    }
     setCardState(cards.arducopter, serviceStateToCard(arducopter.status));
 
-    mavproxyStatus.textContent = formatServiceStatus(mavproxy.status);
-    mavproxyMeta.textContent = mavproxy.detail || "Awaiting status.";
+    if (mavproxyStatus) {
+      mavproxyStatus.textContent = formatServiceStatus(mavproxy.status);
+    }
+    if (mavproxyMeta) {
+      mavproxyMeta.textContent = mavproxy.detail || "Awaiting status.";
+    }
     setCardState(cards.mavproxy, serviceStateToCard(mavproxy.status));
 
-    uplinkStatus.textContent = formatServiceStatus(uplink.status);
-    uplinkMeta.textContent = uplink.detail || "Awaiting status.";
+    if (uplinkStatus) {
+      uplinkStatus.textContent = formatServiceStatus(uplink.status);
+    }
+    if (uplinkMeta) {
+      uplinkMeta.textContent = uplink.detail || "Awaiting status.";
+    }
     setCardState(cards.uplink, serviceStateToCard(uplink.status));
   }
 
