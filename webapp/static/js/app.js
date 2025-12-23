@@ -44,12 +44,9 @@ const systemMemory = document.getElementById("system-memory");
 const systemMemoryMeta = document.getElementById("system-memory-meta");
 const systemDisk = document.getElementById("system-disk");
 const systemDiskMeta = document.getElementById("system-disk-meta");
-const systemUptime = document.getElementById("system-uptime");
-const systemUptimeMeta = document.getElementById("system-uptime-meta");
 const headerLoad = document.getElementById("header-load");
 const headerMemory = document.getElementById("header-memory");
 const headerDisk = document.getElementById("header-disk");
-const headerUptime = document.getElementById("header-uptime");
 
 let engageToggleAction = null;
 
@@ -67,7 +64,6 @@ const cards = {
   systemLoad: document.getElementById("system-load-card"),
   systemMemory: document.getElementById("system-memory-card"),
   systemDisk: document.getElementById("system-disk-card"),
-  systemUptime: document.getElementById("system-uptime-card"),
 };
 
 function setCardState(card, state) {
@@ -303,8 +299,7 @@ function formatSystemSummary(system) {
     system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
       ? `${formatBytes(system.disk_free_bytes)} free`
       : "n/a";
-  const uptime = formatUptime(system.uptime_s);
-  return `Load ${load} · Mem ${mem} · Disk ${disk} · Uptime ${uptime}`;
+  return `Load ${load} · Mem ${mem} · Disk ${disk}`;
 }
 
 function formatHeaderReadout(meta, system) {
@@ -677,9 +672,6 @@ function updateSnapshot(snapshot) {
           ? formatBytes(system.disk_free_bytes)
           : "n/a";
     }
-    if (headerUptime) {
-      headerUptime.textContent = formatUptime(system.uptime_s);
-    }
     if (systemLoad) {
       if (system.load_1 !== null && system.load_5 !== null && system.load_15 !== null) {
         systemLoad.textContent = `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(
@@ -726,13 +718,6 @@ function updateSnapshot(snapshot) {
       }
     }
 
-    if (systemUptime) {
-      systemUptime.textContent = formatUptime(system.uptime_s);
-      systemUptimeMeta.textContent =
-        system.uptime_s !== null && system.uptime_s !== undefined
-        ? `Booted ${formatAge(system.uptime_s)}`
-        : "Uptime telemetry unavailable.";
-    }
   }
 
   updateEngageToggle(onics);

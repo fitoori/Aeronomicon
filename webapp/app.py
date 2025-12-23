@@ -471,7 +471,6 @@ class OnicsController:
             "load_5": None,
             "load_15": None,
             "cpu_count": os.cpu_count() or 0,
-            "uptime_s": None,
             "mem_total_bytes": None,
             "mem_available_bytes": None,
             "mem_used_bytes": None,
@@ -486,14 +485,6 @@ class OnicsController:
             stats["load_5"] = load_5
             stats["load_15"] = load_15
         except (AttributeError, OSError):
-            pass
-
-        try:
-            with open("/proc/uptime", "r", encoding="utf-8") as uptime_file:
-                uptime = uptime_file.read().strip().split()
-                if uptime:
-                    stats["uptime_s"] = float(uptime[0])
-        except (OSError, ValueError):
             pass
 
         mem_total = None
