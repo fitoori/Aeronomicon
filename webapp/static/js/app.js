@@ -314,6 +314,7 @@ function setupPinSections() {
     placeholder.className = "pin-placeholder";
     placeholder.setAttribute("aria-hidden", "true");
     section.after(placeholder);
+    section.hidden = true;
     pinSections.set(key, {
       element: section,
       placeholder,
@@ -330,6 +331,7 @@ function restoreSection(key) {
   if (placeholder.parentElement) {
     placeholder.parentElement.insertBefore(element, placeholder);
   }
+  element.hidden = true;
 }
 
 function pinSection(key) {
@@ -340,6 +342,7 @@ function pinSection(key) {
     restoreSection(currentPinnedSection);
   }
   const entry = pinSections.get(key);
+  entry.element.hidden = false;
   pinHost.appendChild(entry.element);
   currentPinnedSection = key;
 }
@@ -349,6 +352,9 @@ function applyPinnedSection(value) {
   if (!pinSections.has(key)) {
     return;
   }
+  pinSections.forEach((entry) => {
+    entry.element.hidden = true;
+  });
   pinSection(key);
   if (pinSectionSelect) {
     pinSectionSelect.value = key;
