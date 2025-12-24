@@ -1142,6 +1142,58 @@ class OnicsController:
         self._services_check()
         return ok, detail or ("Restarted" if ok else "Restart failed")
 
+    def reboot_vehicle(self) -> Tuple[bool, str]:
+        with self._lock:
+            if not (self._health.tailscale_ok and self._health.dns_ok and self._health.tcp_ok):
+                return False, "Tailnet/SSH health is not OK; refusing to reboot"
+
+        client: Optional[paramiko.SSHClient]
+        created = False
+        with self._lock:
+            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
+
+        if client is None:
+            client, err, _ms = self._ssh_connect()
+            if client is None:
+                self._mark_failure()
+                self._handle_ssh_failure(err)
+                return False, f"SSH error: {err}"
+            created = True
+
+        ok = False
+        detail = ""
+        try:
+            commands = [
+                "sudo -n reboot now",
+                "reboot now",
+            ]
+            for cmd in commands:
+                _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
+                try:
+                    exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+                except Exception:
+                    exit_status = 0
+                out = stdout.read().decode("utf-8", errors="replace")
+                err = stderr.read().decode("utf-8", errors="replace")
+                detail = (err or out or "").strip()
+                if exit_status == 0:
+                    ok = True
+                    break
+        except Exception as e:
+            detail = f"{type(e).__name__}: {e}"
+            ok = False
+        finally:
+            if created and client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+
+        outcome = "OK" if ok else "FAILED"
+        log_detail = f" ({detail})" if detail else ""
+        self._append_log(f"VEHICLE RESTART {outcome}: reboot now{log_detail}")
+        return ok, detail or ("Restarting" if ok else "Restart failed")
+
     def _remote_stop(self, pid: Optional[int]) -> Tuple[bool, str]:
         # Attempt to use existing SSH client if present; otherwise reconnect.
         client = None
@@ -1474,6 +1526,12 @@ def api_clear() -> Response:
 @app.post("/api/services/<service_key>/restart")
 def api_service_restart(service_key: str) -> Response:
     ok, msg = controller.restart_service(service_key)
+    return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
+
+
+@app.post("/api/reboot")
+def api_reboot() -> Response:
+    ok, msg = controller.reboot_vehicle()
     return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
 
 

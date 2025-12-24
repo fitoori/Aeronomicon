@@ -24,6 +24,18 @@
       />
     </div>
 
+    <div class="reboot-screen hidden" id="reboot-screen" aria-live="polite" aria-hidden="true">
+      <img
+        src="{{ url_for('static', filename='img/onics-seal.svg') }}"
+        alt="Wireless Autonomous Terrestrial Navigation Experiment seal"
+        class="loading-logo"
+      />
+      <p class="loading-title">Vehicle restarting</p>
+      <p class="loading-subtitle">
+        Do not refresh this page. Wait for the vehicle to come back online.
+      </p>
+    </div>
+
     <div class="modal" id="login-modal" aria-hidden="true">
       <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="login-title">
         <h2 id="login-title">SSH Login Required</h2>
@@ -52,12 +64,34 @@
     <main class="shell" aria-live="polite">
       <header class="shell__header">
         <div class="shell__brand">
-          <div class="shell__logo-wrap" aria-hidden="true">
-            <img
-              src="{{ url_for('static', filename='img/onics-seal.svg') }}"
-              alt="ONICS seal"
-              class="shell__logo"
-            />
+          <div class="shell__logo-menu">
+            <button
+              class="shell__logo-button"
+              id="logo-menu-button"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >
+              <span class="shell__logo-wrap" aria-hidden="true">
+                <img
+                  src="{{ url_for('static', filename='img/onics-seal.svg') }}"
+                  alt="ONICS seal"
+                  class="shell__logo"
+                />
+              </span>
+              <span class="shell__logo-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="shell__logo-dropdown" id="logo-menu" role="menu" aria-hidden="true">
+              <div class="menu-warning">
+                <p class="menu-warning__title">Restart vehicle</p>
+                <p class="menu-warning__text">
+                  Warning: do not initiate a restart if the vehicle is in flight.
+                </p>
+              </div>
+              <button class="menu-action" type="button" id="reboot-btn">
+                Restart vehicle
+              </button>
+            </div>
           </div>
           <div class="shell__stats" aria-label="System statistics">
             <div class="health-card shell__stat-card load-card">
