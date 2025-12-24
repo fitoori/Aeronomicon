@@ -103,7 +103,7 @@ LTE_SIGNAL_LOAD_THRESHOLD = float(os.environ.get("LTE_SIGNAL_LOAD_THRESHOLD", "4
 SYSTEM_STATS_CHECK_S = float(os.environ.get("SYSTEM_STATS_CHECK_S", "5.0"))
 REMOTE_LTE_SIGNAL_SCRIPT = os.environ.get(
     "WATNE_LTE_SIGNAL_SCRIPT",
-    "~/Aeronomicon/util/lte-signal-strength.sh",
+    "$HOME/Aeronomicon/util/lte-signal-strength.sh",
 ).strip()
 LTE_SIGNAL_TIMEOUT_S = float(os.environ.get("LTE_SIGNAL_TIMEOUT_S", "5.0"))
 
@@ -696,7 +696,8 @@ class OnicsController:
                 return dict(stats)
             created = True
 
-        cmd = f"bash -lc {shlex.quote(REMOTE_LTE_SIGNAL_SCRIPT)}"
+        remote_script = REMOTE_LTE_SIGNAL_SCRIPT.replace("'", "'\"'\"'")
+        cmd = f"bash -lc 'exec \"{remote_script}\"'"
         try:
             _stdin, stdout, stderr = client.exec_command(
                 cmd,
