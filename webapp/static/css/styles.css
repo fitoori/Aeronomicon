@@ -25,13 +25,13 @@ body {
 }
 
 .shell {
-  max-width: 1120px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
-    calc(32px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
+  padding: calc(16px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right))
+    calc(24px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   transition: filter 0.35s ease;
 }
 
@@ -43,15 +43,15 @@ body.is-offline .shell {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   align-items: flex-start;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding-bottom: 14px;
+  padding-bottom: 10px;
 }
 
 .shell__brand {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   align-items: flex-start;
   flex-wrap: wrap;
   flex: 1 1 320px;
@@ -174,7 +174,7 @@ body.is-offline .shell {
 
 .shell__stats {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
   flex-wrap: wrap;
   align-items: stretch;
@@ -210,7 +210,7 @@ body.is-offline .shell {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .grid--primary {
@@ -226,7 +226,7 @@ body.is-offline .shell {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 220px;
+  min-height: 200px;
 }
 
 .panel--full {
@@ -235,7 +235,7 @@ body.is-offline .shell {
 }
 
 .panel__header {
-  padding: 16px 20px 8px;
+  padding: 14px 18px 6px;
 }
 
 .panel__header--actions {
@@ -257,10 +257,10 @@ body.is-offline .shell {
 }
 
 .panel__body {
-  padding: 10px 20px 18px;
+  padding: 8px 18px 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   flex: 1;
 }
 
@@ -270,7 +270,7 @@ body.is-offline .shell {
 
 .toolbar-grid {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   align-items: start;
 }
@@ -279,10 +279,10 @@ body.is-offline .shell {
   background: rgba(10, 16, 13, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  padding: 14px 18px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .toolbar__header h2 {
@@ -299,12 +299,12 @@ body.is-offline .shell {
 .toolbar__items {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .button-row {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -365,7 +365,7 @@ body.is-offline .shell {
 
 .status-strip {
   margin-top: auto;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 10px;
   background: rgba(12, 20, 16, 0.7);
   border: 1px solid rgba(74, 222, 128, 0.2);
@@ -394,7 +394,7 @@ body.is-offline .shell {
 
 .health-card {
   border-radius: 10px;
-  padding: 12px;
+  padding: 10px;
   background: rgba(6, 10, 9, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -431,15 +431,15 @@ body.is-offline .shell {
 .pin-area {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .pin-area__controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 14px;
   border-radius: 12px;
   background: rgba(10, 16, 13, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -475,7 +475,7 @@ body.is-offline .shell {
 
 .pin-host {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .pin-placeholder {
@@ -485,7 +485,7 @@ body.is-offline .shell {
 .health-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .system-stats {
@@ -577,8 +577,8 @@ body.is-offline .shell {
   background: #07110c;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 12px;
-  height: 280px;
+  padding: 10px;
+  height: 250px;
   overflow-y: auto;
   font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: 0.82rem;
@@ -758,8 +758,8 @@ body.is-rebooting .shell {
 
 @media (max-width: 720px) {
   .shell {
-    padding: calc(24px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
-      calc(40px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+    padding: calc(20px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
+      calc(32px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
   }
 
   .shell__brand {
