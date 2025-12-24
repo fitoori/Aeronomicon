@@ -3,7 +3,11 @@ const clearBtn = document.getElementById("clear-btn");
 const logView = document.getElementById("log-view");
 const loadingScreen = document.getElementById("loading-screen");
 const offlineScreen = document.getElementById("offline-screen");
+const rebootScreen = document.getElementById("reboot-screen");
 const connectionPill = document.getElementById("connection-pill");
+const logoMenuButton = document.getElementById("logo-menu-button");
+const logoMenu = document.getElementById("logo-menu");
+const rebootBtn = document.getElementById("reboot-btn");
 const onicsState = document.querySelector("#onics-state .status-strip__value");
 const onicsRuntime = document.getElementById("onics-runtime");
 const loginModal = document.getElementById("login-modal");
@@ -52,6 +56,26 @@ const pinSectionSelect = document.getElementById("pin-section-select");
 const pinHost = document.getElementById("pin-host");
 
 let engageToggleAction = null;
+let rebootPending = false;
+let rebootAwaitingLoss = false;
+
+function setLogoMenuOpen(open) {
+  if (!logoMenuButton || !logoMenu) {
+    return;
+  }
+  logoMenuButton.setAttribute("aria-expanded", open ? "true" : "false");
+  logoMenu.setAttribute("aria-hidden", open ? "false" : "true");
+  logoMenu.classList.toggle("is-open", open);
+}
+
+function setRebootOverlay(visible) {
+  if (!rebootScreen) {
+    return;
+  }
+  rebootScreen.classList.toggle("hidden", !visible);
+  rebootScreen.setAttribute("aria-hidden", visible ? "false" : "true");
+  document.body.classList.toggle("is-rebooting", visible);
+}
 
 const cards = {
   tailscale: document.getElementById("tailscale-card"),
@@ -672,6 +696,17 @@ function updateSnapshot(snapshot, options = {}) {
     !health?.tailscale_ok ||
     !health?.dns_ok ||
     !health?.tcp_ok;
+  const linkDown =
+    !health?.tailscale_ok || !health?.dns_ok || !health?.tcp_ok || health?.los || health?.stale;
+  if (rebootPending) {
+    if (rebootAwaitingLoss && linkDown) {
+      rebootAwaitingLoss = false;
+    }
+    if (!rebootAwaitingLoss && !linkDown) {
+      rebootPending = false;
+    }
+  }
+  setRebootOverlay(rebootPending);
   connectionPill.textContent = health.los
     ? "LINK: LOS"
     : linkDegraded
@@ -847,10 +882,13 @@ function updateSnapshot(snapshot, options = {}) {
 
   updateEngageToggle(onics);
 
-  const restartReady = health.tailscale_ok && health.dns_ok && health.tcp_ok;
+  const restartReady = health.tailscale_ok && health.dns_ok && health.tcp_ok && !rebootPending;
   serviceRestartButtons.forEach((button) => {
     button.disabled = !restartReady;
   });
+  if (rebootBtn) {
+    rebootBtn.disabled = !restartReady;
+  }
 }
 
 function appendLog(line) {
@@ -923,6 +961,53 @@ serviceRestartButtons.forEach((button) => {
   });
 });
 
+logoMenuButton?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const isOpen = logoMenu?.classList.contains("is-open");
+  setLogoMenuOpen(!isOpen);
+});
+
+document.addEventListener("click", (event) => {
+  if (!logoMenu || !logoMenuButton) {
+    return;
+  }
+  if (logoMenu.contains(event.target) || logoMenuButton.contains(event.target)) {
+    return;
+  }
+  setLogoMenuOpen(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    setLogoMenuOpen(false);
+  }
+});
+
+rebootBtn?.addEventListener("click", async () => {
+  const shouldRestart = window.confirm(
+    "Restart the vehicle now?\n\nWarning: Do not initiate a restart if the vehicle is in flight."
+  );
+  if (!shouldRestart) {
+    return;
+  }
+  rebootBtn.disabled = true;
+  setLogoMenuOpen(false);
+  try {
+    const data = await sendCommand("/api/reboot");
+    rebootPending = true;
+    rebootAwaitingLoss = true;
+    setRebootOverlay(true);
+    updateSnapshot(data.snapshot);
+    appendLog("VEHICLE RESTART REQUESTED: reboot now");
+  } catch (err) {
+    appendLog(`VEHICLE RESTART FAILED: ${err.message}`);
+  } finally {
+    if (!rebootPending) {
+      rebootBtn.disabled = false;
+    }
+  }
+});
+
 loginDismissBtn?.addEventListener("click", () => {
   loginModal?.classList.remove("is-visible");
   loginModal?.setAttribute("aria-hidden", "true");
@@ -952,6 +1037,10 @@ eventSource.onerror = () => {
   connectionPill.textContent = "LINK: OFFLINE";
   connectionPill.style.borderColor = "rgba(249,115,22,0.6)";
   connectionPill.style.color = "#f97316";
+  if (rebootPending) {
+    rebootAwaitingLoss = false;
+    setRebootOverlay(true);
+  }
 };
 
 setupPinSections();
