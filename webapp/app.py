@@ -107,10 +107,10 @@ REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
 REMOTE_HEALTH_LOS_S = float(os.environ.get("REMOTE_HEALTH_LOS_S", "15.0"))
 
 # SSH timeouts
-SSH_CONNECT_TIMEOUT_S = float(os.environ.get("SSH_CONNECT_TIMEOUT_S", "3.0"))
-SSH_BANNER_TIMEOUT_S = float(os.environ.get("SSH_BANNER_TIMEOUT_S", "3.0"))
-SSH_BANNER_TIMEOUT_RETRY_S = float(os.environ.get("SSH_BANNER_TIMEOUT_RETRY_S", "10.0"))
-SSH_AUTH_TIMEOUT_S = float(os.environ.get("SSH_AUTH_TIMEOUT_S", "6.0"))
+SSH_CONNECT_TIMEOUT_S = float(os.environ.get("SSH_CONNECT_TIMEOUT_S", "5.0"))
+SSH_BANNER_TIMEOUT_S = float(os.environ.get("SSH_BANNER_TIMEOUT_S", "5.0"))
+SSH_BANNER_TIMEOUT_RETRY_S = float(os.environ.get("SSH_BANNER_TIMEOUT_RETRY_S", "20.0"))
+SSH_AUTH_TIMEOUT_S = float(os.environ.get("SSH_AUTH_TIMEOUT_S", "12.0"))
 
 # Process stop behavior
 STOP_GRACE_S = float(os.environ.get("STOP_GRACE_S", "3.0"))
