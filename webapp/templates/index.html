@@ -193,9 +193,15 @@
           </div>
           <div class="toolbar__items">
             <div class="health-card" id="tailscale-card">
-              <h3>Tailscale</h3>
+              <div class="health-card__header">
+                <h3>Tailscale</h3>
+                <p class="health-card__badge" id="tailscale-backend">Backend: UNKNOWN</p>
+              </div>
               <p class="health-card__value" id="tailscale-status">UNKNOWN</p>
               <p class="health-card__meta" id="tailscale-meta">Awaiting tailscale status.</p>
+              <p class="health-card__meta health-card__meta--muted" id="tailscale-error">
+                No errors reported.
+              </p>
             </div>
             <div class="health-card" id="dns-card">
               <h3>MagicDNS</h3>

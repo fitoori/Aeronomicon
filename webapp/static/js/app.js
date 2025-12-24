@@ -20,7 +20,9 @@ const loginDismissBtn = document.getElementById("login-dismiss-btn");
 const serviceRestartButtons = document.querySelectorAll("[data-service-restart]");
 
 const tailscaleStatus = document.getElementById("tailscale-status");
+const tailscaleBackend = document.getElementById("tailscale-backend");
 const tailscaleMeta = document.getElementById("tailscale-meta");
+const tailscaleError = document.getElementById("tailscale-error");
 const dnsStatus = document.getElementById("dns-status");
 const dnsMeta = document.getElementById("dns-meta");
 const tcpStatus = document.getElementById("tcp-status");
@@ -742,8 +744,21 @@ function updateSnapshot(snapshot, options = {}) {
   if (tailscaleStatus) {
     tailscaleStatus.textContent = health.tailscale_ok ? "RUNNING" : "OFFLINE";
   }
+  if (tailscaleBackend) {
+    const backend = health.tailscale_backend_state || "UNKNOWN";
+    tailscaleBackend.textContent = `Backend: ${backend}`;
+  }
   if (tailscaleMeta) {
-    tailscaleMeta.textContent = health.tailscale_error || health.tailscale_backend_state;
+    if (health.tailscale_present === false) {
+      tailscaleMeta.textContent = "Tailscale not installed.";
+    } else if (health.tailscale_ok) {
+      tailscaleMeta.textContent = "Tailnet link healthy.";
+    } else {
+      tailscaleMeta.textContent = "Tailnet link unavailable.";
+    }
+  }
+  if (tailscaleError) {
+    tailscaleError.textContent = health.tailscale_error || "No errors reported.";
   }
   setCardState(cards.tailscale, health.tailscale_ok ? "ok" : "danger");
 
