@@ -27,7 +27,7 @@ body {
 .shell {
   max-width: 1180px;
   margin: 0 auto;
-  padding: calc(16px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right))
+  padding: calc(8px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right))
     calc(24px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
@@ -758,7 +758,7 @@ body.is-rebooting .shell {
 
 @media (max-width: 720px) {
   .shell {
-    padding: calc(20px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
+    padding: calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
       calc(32px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
   }
 
