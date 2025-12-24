@@ -109,6 +109,7 @@ REMOTE_HEALTH_LOS_S = float(os.environ.get("REMOTE_HEALTH_LOS_S", "15.0"))
 # SSH timeouts
 SSH_CONNECT_TIMEOUT_S = float(os.environ.get("SSH_CONNECT_TIMEOUT_S", "3.0"))
 SSH_BANNER_TIMEOUT_S = float(os.environ.get("SSH_BANNER_TIMEOUT_S", "3.0"))
+SSH_BANNER_TIMEOUT_RETRY_S = float(os.environ.get("SSH_BANNER_TIMEOUT_RETRY_S", "10.0"))
 SSH_AUTH_TIMEOUT_S = float(os.environ.get("SSH_AUTH_TIMEOUT_S", "6.0"))
 
 # Process stop behavior
@@ -999,40 +1000,59 @@ class OnicsController:
     # --- SSH operations
 
     def _ssh_connect(self) -> Tuple[Optional[paramiko.SSHClient], str, int]:
-        start = time.time()
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         hostname, username, port, identity_files, proxycommand = self._resolve_ssh_settings()
-        sock = None
-        if proxycommand:
-            try:
-                sock = paramiko.ProxyCommand(proxycommand)
-            except Exception:
-                sock = None
+        start = time.time()
 
-        try:
-            client.connect(
-                hostname=hostname,
-                port=port,
-                username=username,
-                timeout=SSH_CONNECT_TIMEOUT_S,
-                banner_timeout=SSH_BANNER_TIMEOUT_S,
-                auth_timeout=SSH_AUTH_TIMEOUT_S,
-                allow_agent=True,
-                look_for_keys=True,
-                key_filename=identity_files or None,
-                sock=sock,
-            )
-            ms = int((time.time() - start) * 1000)
-            return client, "", ms
-        except Exception as e:
-            if sock is not None:
+        def _connect(banner_timeout_s: float) -> Tuple[Optional[paramiko.SSHClient], str, Optional[Exception]]:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            sock = None
+            if proxycommand:
                 try:
-                    sock.close()
+                    sock = paramiko.ProxyCommand(proxycommand)
+                except Exception:
+                    sock = None
+
+            try:
+                client.connect(
+                    hostname=hostname,
+                    port=port,
+                    username=username,
+                    timeout=SSH_CONNECT_TIMEOUT_S,
+                    banner_timeout=banner_timeout_s,
+                    auth_timeout=SSH_AUTH_TIMEOUT_S,
+                    allow_agent=True,
+                    look_for_keys=True,
+                    key_filename=identity_files or None,
+                    sock=sock,
+                )
+                return client, "", None
+            except Exception as e:
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+                try:
+                    client.close()
                 except Exception:
                     pass
-            ms = int((time.time() - start) * 1000)
-            return None, f"{type(e).__name__}: {e}", ms
+                return None, f"{type(e).__name__}: {e}", e
+
+        def _is_banner_timeout(err: Exception) -> bool:
+            msg = str(err).lower()
+            return "error reading ssh protocol banner" in msg or "banner" in msg
+
+        client, err, exc = _connect(SSH_BANNER_TIMEOUT_S)
+        if client is None and exc is not None:
+            retry_timeout = max(SSH_BANNER_TIMEOUT_RETRY_S, SSH_BANNER_TIMEOUT_S)
+            if _is_banner_timeout(exc) and retry_timeout > SSH_BANNER_TIMEOUT_S:
+                client, err, exc = _connect(retry_timeout)
+                if client is None:
+                    err = f"{err} (after banner-timeout retry)"
+
+        ms = int((time.time() - start) * 1000)
+        return client, err, ms
 
     def _ssh_close(self) -> None:
         try:
