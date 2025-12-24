@@ -396,6 +396,18 @@ function recordLoadPoint(value, cpuCount) {
   drawAllLoadGraphs();
 }
 
+function recordMemoryPoint(value, total) {
+  if (!Number.isFinite(value)) {
+    return;
+  }
+  if (Number.isFinite(total)) {
+    memoryHistoryTotal = Number(total);
+  }
+  memoryHistory.push({ ts: Date.now(), value: Number(value) });
+  pruneMemoryHistory(Date.now());
+  drawAllMemoryGraphs();
+}
+
 
 function formatSystemSummary(system) {
   if (!system) {
