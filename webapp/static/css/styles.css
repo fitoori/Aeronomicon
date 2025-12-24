@@ -73,6 +73,7 @@ body.is-offline .shell {
   place-items: center;
   background: rgba(8, 14, 11, 0.55);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease;
 }
 
 .shell__logo {
@@ -100,6 +101,10 @@ body.is-offline .shell {
   padding: 4px 6px;
   border-radius: 999px;
   cursor: pointer;
+}
+
+.shell__logo-button:hover .shell__logo-wrap {
+  transform: scale(1.05);
 }
 
 .shell__logo-button:focus-visible {
