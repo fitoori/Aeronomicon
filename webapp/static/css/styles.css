@@ -24,6 +24,11 @@ body {
   background: radial-gradient(circle at top, #163225, #0a120f 55%);
 }
 
+img,
+canvas {
+  max-width: 100%;
+}
+
 .shell {
   max-width: 1180px;
   margin: 0 auto;
@@ -254,6 +259,7 @@ body.is-offline .shell {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .panel__header h2 {
@@ -607,7 +613,7 @@ body.is-offline .shell {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 10px;
-  height: 250px;
+  height: clamp(200px, 32vh, 320px);
   overflow-y: auto;
   font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: 0.82rem;
@@ -785,6 +791,29 @@ body.is-rebooting .shell {
   }
 }
 
+@media (max-width: 960px) {
+  .shell__header {
+    align-items: flex-start;
+  }
+
+  .shell__stats {
+    flex: 1 1 100%;
+  }
+
+  .shell__stat-card {
+    flex: 1 1 160px;
+  }
+
+  .toolbar__items {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .pin-area__controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 @media (max-width: 720px) {
   .shell {
     padding: calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
@@ -805,7 +834,8 @@ body.is-rebooting .shell {
   }
 
   .shell__stats {
-    display: none;
+    width: 100%;
+    order: 2;
   }
 
   .system-stats {
@@ -817,6 +847,29 @@ body.is-rebooting .shell {
   }
 
   .grid--primary {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .panel__header--actions {
+    align-items: stretch;
+  }
+
+  .panel__header--actions .btn {
+    width: 100%;
+  }
+
+  .pin-area__controls {
+    padding: 12px;
+  }
+
+  .pin-area__control {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .toolbar__items {
     grid-template-columns: 1fr;
   }
 }
