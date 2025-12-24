@@ -72,6 +72,82 @@ body {
   border-radius: 50%;
 }
 
+.shell__logo-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.shell__logo-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: inherit;
+  padding: 4px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.shell__logo-button:focus-visible {
+  outline: 2px solid rgba(74, 222, 128, 0.6);
+  outline-offset: 2px;
+}
+
+.shell__logo-caret {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.shell__logo-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  min-width: 220px;
+  background: rgba(9, 14, 12, 0.95);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-radius: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 40;
+}
+
+.shell__logo-dropdown.is-open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.menu-action {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(127, 29, 29, 0.5);
+  color: #fecaca;
+  font-weight: 600;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.2s ease;
+}
+
+.menu-action:hover {
+  transform: translateY(-1px);
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
+.menu-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .shell__eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -528,8 +604,27 @@ body {
   transition: opacity 0.4s ease;
 }
 
-.loading-screen.hidden {
+.loading-screen.hidden,
+.reboot-screen.hidden {
   opacity: 0;
+  pointer-events: none;
+}
+
+.reboot-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 20px;
+  background: radial-gradient(circle, rgba(10, 18, 14, 0.96), rgba(3, 6, 5, 0.98));
+  z-index: 998;
+  transition: opacity 0.4s ease;
+}
+
+body.is-rebooting .shell {
+  filter: blur(6px);
   pointer-events: none;
 }
 
