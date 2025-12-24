@@ -638,12 +638,13 @@ function setLoginPrompt(meta, onics) {
   }
 }
 
-function updateSnapshot(snapshot) {
+function updateSnapshot(snapshot, options = {}) {
   if (!snapshot) {
     return;
   }
-
-  setOfflineState(false);
+  if (options.fromStream) {
+    setOfflineState(false);
+  }
 
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
     loadingScreen.classList.add("hidden");
@@ -930,11 +931,11 @@ eventSource.onopen = () => {
 };
 
 eventSource.addEventListener("status", (event) => {
-  updateSnapshot(JSON.parse(event.data));
+  updateSnapshot(JSON.parse(event.data), { fromStream: true });
 });
 
 eventSource.addEventListener("state", (event) => {
-  updateSnapshot(JSON.parse(event.data));
+  updateSnapshot(JSON.parse(event.data), { fromStream: true });
 });
 
 eventSource.addEventListener("log", (event) => {
