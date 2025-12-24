@@ -67,6 +67,10 @@ const cards = {
   systemDisk: document.getElementById("system-disk-card"),
 };
 
+function setOfflineState(isOffline) {
+  document.body.classList.toggle("is-offline", isOffline);
+}
+
 function setCardState(card, state) {
   if (!card) {
     return;
@@ -639,6 +643,8 @@ function updateSnapshot(snapshot) {
     return;
   }
 
+  setOfflineState(false);
+
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
     loadingScreen.classList.add("hidden");
     setTimeout(() => loadingScreen.remove(), 600);
@@ -919,6 +925,10 @@ loginDismissBtn?.addEventListener("click", () => {
 
 const eventSource = new EventSource("/stream");
 
+eventSource.onopen = () => {
+  setOfflineState(false);
+};
+
 eventSource.addEventListener("status", (event) => {
   updateSnapshot(JSON.parse(event.data));
 });
@@ -933,6 +943,7 @@ eventSource.addEventListener("log", (event) => {
 });
 
 eventSource.onerror = () => {
+  setOfflineState(true);
   connectionPill.textContent = "LINK: OFFLINE";
   connectionPill.style.borderColor = "rgba(249,115,22,0.6)";
   connectionPill.style.color = "#f97316";

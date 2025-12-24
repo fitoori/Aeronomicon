@@ -32,6 +32,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  transition: filter 0.35s ease;
+}
+
+body.is-offline .shell {
+  filter: blur(6px);
 }
 
 .shell__header {
