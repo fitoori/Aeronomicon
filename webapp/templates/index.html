@@ -96,42 +96,23 @@
           </div>
           <div class="shell__stats" aria-label="System statistics">
             <div class="health-card shell__stat-card load-card">
-              <h3>Load Avg</h3>
               <div class="load-graph load-graph--header" aria-hidden="true">
                 <canvas id="header-load-graph" role="img" aria-label="System load history"></canvas>
               </div>
               <p class="health-card__value" id="header-load">n/a</p>
             </div>
             <div class="health-card shell__stat-card">
-              <h3>Memory Free</h3>
               <p class="health-card__value" id="header-memory">n/a</p>
             </div>
-            <div class="health-card shell__stat-card">
-              <h3>Disk Free</h3>
-              <p class="health-card__value" id="header-disk">n/a</p>
+            <div class="health-card shell__stat-card shell__stat-card--action">
+              <button class="btn btn--engage" id="engage-toggle-btn">ENGAGE</button>
             </div>
           </div>
         </div>
         <div class="shell__status" id="connection-pill">LINK: INIT</div>
       </header>
 
-      <section class="grid grid--primary">
-        <article class="panel">
-          <header class="panel__header">
-            <h2>Command Deck</h2>
-          </header>
-          <div class="panel__body">
-            <div class="button-row">
-              <button class="btn btn--engage" id="engage-toggle-btn">ENGAGE</button>
-            </div>
-            <div class="status-strip" id="onics-state">
-              <span class="status-strip__label">State</span>
-              <strong class="status-strip__value">IDLE</strong>
-              <span class="status-strip__meta" id="onics-runtime">SSH offline · last output n/a</span>
-            </div>
-          </div>
-        </article>
-
+      <section class="grid">
         <article class="panel">
           <header class="panel__header panel__header--actions">
             <h2>Telemetry Log</h2>
