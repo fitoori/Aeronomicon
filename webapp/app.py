@@ -144,7 +144,7 @@ def which_or_none(exe: str) -> Optional[str]:
     p = shutil.which(exe)
     if p:
         return p
-    for extra in ("/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/local/bin"):
+    for extra in ("/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/local/bin"):
         candidate = os.path.join(extra, exe)
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
@@ -564,13 +564,17 @@ class OnicsController:
         df_lines = [line for line in parts[2].splitlines() if line.strip()]
         if df_lines:
             columns = df_lines[-1].split()
-            if len(columns) >= 4:
-                try:
+            try:
+                if len(columns) == 3:
+                    stats["disk_total_bytes"] = int(columns[0])
+                    stats["disk_used_bytes"] = int(columns[1])
+                    stats["disk_free_bytes"] = int(columns[2])
+                elif len(columns) >= 4:
                     stats["disk_total_bytes"] = int(columns[1])
                     stats["disk_used_bytes"] = int(columns[2])
                     stats["disk_free_bytes"] = int(columns[3])
-                except ValueError:
-                    pass
+            except ValueError:
+                pass
 
         cpu_line = parts[3].strip().splitlines()
         if cpu_line:
@@ -588,7 +592,10 @@ class OnicsController:
             "echo \"---\"; "
             "cat /proc/meminfo 2>/dev/null; "
             "echo \"---\"; "
-            "df -B1 / 2>/dev/null | tail -n 1; "
+            "df_line=$(df -B1 / 2>/dev/null | tail -n 1); "
+            "if [ -n \"$df_line\" ]; then "
+            "echo $df_line | awk '{print $2, $3, $4}'; "
+            "else df -k / 2>/dev/null | tail -n 1 | awk '{print $2 * 1024, $3 * 1024, $4 * 1024}'; fi; "
             "echo \"---\"; "
             "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0'"
         )
