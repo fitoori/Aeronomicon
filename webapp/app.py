@@ -52,7 +52,7 @@ _missing: List[str] = []
 
 try:
     from flask import Flask, Response, jsonify, render_template
-    from werkzeug.serving import make_server
+    from werkzeug.serving import WSGIRequestHandler, make_server
 except Exception:  # pragma: no cover
     _missing.append("flask")
 
@@ -220,6 +220,20 @@ class SSEBroker:
             except queue.Full:
                 # Unstable/slow client; drop newest update.
                 pass
+
+
+class QuietWSGIRequestHandler(WSGIRequestHandler):
+    _SUPPRESSED_ERRORS = (
+        "Bad request version",
+        "Bad request syntax",
+        "Bad HTTP/0.9 request type",
+    )
+
+    def log_error(self, format: str, *args: Any) -> None:
+        message = format % args
+        if any(token in message for token in self._SUPPRESSED_ERRORS):
+            return
+        super().log_error(format, *args)
 
 
 # ---- State models ------------------------------------------------------------
@@ -1566,7 +1580,13 @@ def main() -> int:
     t.start()
 
     # Run Flask with a shutdown handle for clean SIGTERM/SIGINT exits.
-    server = make_server(FLASK_HOST, FLASK_PORT, app, threaded=True)
+    server = make_server(
+        FLASK_HOST,
+        FLASK_PORT,
+        app,
+        threaded=True,
+        request_handler=QuietWSGIRequestHandler,
+    )
     _install_signal_handlers(stop_evt, server.shutdown)
     try:
         server.serve_forever()
