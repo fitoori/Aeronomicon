@@ -142,7 +142,13 @@ def safe_json_dumps(obj: Any) -> str:
 
 def which_or_none(exe: str) -> Optional[str]:
     p = shutil.which(exe)
-    return p if p else None
+    if p:
+        return p
+    for extra in ("/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/local/bin"):
+        candidate = os.path.join(extra, exe)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def load_ssh_config() -> Optional[paramiko.SSHConfig]:
