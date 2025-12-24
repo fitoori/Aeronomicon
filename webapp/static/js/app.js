@@ -2,6 +2,7 @@ const engageToggleBtn = document.getElementById("engage-toggle-btn");
 const clearBtn = document.getElementById("clear-btn");
 const logView = document.getElementById("log-view");
 const loadingScreen = document.getElementById("loading-screen");
+const offlineScreen = document.getElementById("offline-screen");
 const connectionPill = document.getElementById("connection-pill");
 const onicsState = document.querySelector("#onics-state .status-strip__value");
 const onicsRuntime = document.getElementById("onics-runtime");
@@ -66,6 +67,13 @@ const cards = {
   systemMemory: document.getElementById("system-memory-card"),
   systemDisk: document.getElementById("system-disk-card"),
 };
+
+function setOfflineState(isOffline) {
+  document.body.classList.toggle("is-offline", isOffline);
+  if (offlineScreen) {
+    offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
+  }
+}
 
 function setCardState(card, state) {
   if (!card) {
@@ -634,9 +642,12 @@ function setLoginPrompt(meta, onics) {
   }
 }
 
-function updateSnapshot(snapshot) {
+function updateSnapshot(snapshot, options = {}) {
   if (!snapshot) {
     return;
+  }
+  if (options.fromStream) {
+    setOfflineState(false);
   }
 
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
@@ -919,12 +930,16 @@ loginDismissBtn?.addEventListener("click", () => {
 
 const eventSource = new EventSource("/stream");
 
+eventSource.onopen = () => {
+  setOfflineState(false);
+};
+
 eventSource.addEventListener("status", (event) => {
-  updateSnapshot(JSON.parse(event.data));
+  updateSnapshot(JSON.parse(event.data), { fromStream: true });
 });
 
 eventSource.addEventListener("state", (event) => {
-  updateSnapshot(JSON.parse(event.data));
+  updateSnapshot(JSON.parse(event.data), { fromStream: true });
 });
 
 eventSource.addEventListener("log", (event) => {
@@ -933,6 +948,7 @@ eventSource.addEventListener("log", (event) => {
 });
 
 eventSource.onerror = () => {
+  setOfflineState(true);
   connectionPill.textContent = "LINK: OFFLINE";
   connectionPill.style.borderColor = "rgba(249,115,22,0.6)";
   connectionPill.style.color = "#f97316";
