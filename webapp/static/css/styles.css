@@ -197,6 +197,17 @@ body.is-offline .shell {
   font-size: 0.95rem;
 }
 
+.shell__stat-card--action {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+
+.shell__stat-card--action .btn {
+  width: 100%;
+}
+
 .shell__status {
   padding: 0.45rem 0.9rem;
   border-radius: 999px;
