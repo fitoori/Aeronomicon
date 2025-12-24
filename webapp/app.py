@@ -594,8 +594,8 @@ class OnicsController:
             "echo \"---\"; "
             "df_line=$(df -B1 / 2>/dev/null | tail -n 1); "
             "if [ -n \"$df_line\" ]; then "
-            "echo $df_line | awk '{print $2, $3, $4}'; "
-            "else df -k / 2>/dev/null | tail -n 1 | awk '{print $2 * 1024, $3 * 1024, $4 * 1024}'; fi; "
+            "echo $df_line | awk \"{print \\$2, \\$3, \\$4}\"; "
+            "else df -k / 2>/dev/null | tail -n 1 | awk \"{print \\$2 * 1024, \\$3 * 1024, \\$4 * 1024}\"; fi; "
             "echo \"---\"; "
             "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0'"
         )
