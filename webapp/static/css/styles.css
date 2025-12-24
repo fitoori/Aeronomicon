@@ -125,29 +125,6 @@ body {
   pointer-events: auto;
 }
 
-.menu-warning {
-  background: rgba(30, 41, 59, 0.4);
-  border: 1px solid rgba(249, 115, 22, 0.3);
-  border-radius: 10px;
-  padding: 10px;
-  color: #fcd34d;
-  font-size: 0.78rem;
-  line-height: 1.3;
-}
-
-.menu-warning__title {
-  margin: 0;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.65rem;
-  color: #fdba74;
-}
-
-.menu-warning__text {
-  margin: 6px 0 0;
-}
-
 .menu-action {
   width: 100%;
   border-radius: 10px;

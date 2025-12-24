@@ -1169,10 +1169,7 @@ class OnicsController:
             ]
             for cmd in commands:
                 _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
-                try:
-                    exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
-                except Exception:
-                    exit_status = 0
+                exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
                 out = stdout.read().decode("utf-8", errors="replace")
                 err = stderr.read().decode("utf-8", errors="replace")
                 detail = (err or out or "").strip()

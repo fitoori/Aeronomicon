@@ -974,7 +974,7 @@ document.addEventListener("keydown", (event) => {
 
 rebootBtn?.addEventListener("click", async () => {
   const shouldRestart = window.confirm(
-    "Restart the vehicle now? Do not initiate a restart if the vehicle is in flight."
+    "Restart the vehicle now?\n\nWarning: Do not initiate a restart if the vehicle is in flight."
   );
   if (!shouldRestart) {
     return;
