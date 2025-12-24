@@ -95,12 +95,19 @@ TAILSCALE_CHECK_S = float(os.environ.get("TAILSCALE_CHECK_S", "4.0"))  # local t
 DNS_CHECK_S = float(os.environ.get("DNS_CHECK_S", "2.0"))
 TCP_CHECK_S = float(os.environ.get("TCP_CHECK_S", "2.0"))
 SERVICE_CHECK_S = float(os.environ.get("SERVICE_CHECK_S", "3.0"))
-LTE_SIGNAL_CHECK_S = float(os.environ.get("LTE_SIGNAL_CHECK_S", "10.0"))
+LTE_SIGNAL_CHECK_S = float(os.environ.get("LTE_SIGNAL_CHECK_S", "15.0"))
+LTE_SIGNAL_CHECK_HIGH_LOAD_S = float(
+    os.environ.get("LTE_SIGNAL_CHECK_HIGH_LOAD_S", "45.0")
+)
+LTE_SIGNAL_LOAD_THRESHOLD = float(os.environ.get("LTE_SIGNAL_LOAD_THRESHOLD", "4.0"))
 SYSTEM_STATS_CHECK_S = float(os.environ.get("SYSTEM_STATS_CHECK_S", "5.0"))
-LTE_QMICLI_DEVICE = os.environ.get("LTE_QMICLI_DEVICE", "/dev/cdc-wdm0").strip()
-LTE_QMICLI_TIMEOUT_S = float(os.environ.get("LTE_QMICLI_TIMEOUT_S", "3.0"))
-LTE_RSSI_MIN = int(os.environ.get("LTE_RSSI_MIN", "-113"))
-LTE_RSSI_MAX = int(os.environ.get("LTE_RSSI_MAX", "-51"))
+LTE_SIGNAL_SCRIPT = os.path.abspath(
+    os.environ.get(
+        "LTE_SIGNAL_SCRIPT",
+        os.path.join(os.path.dirname(__file__), "..", "util", "lte-signal-strength.sh"),
+    )
+)
+LTE_SIGNAL_TIMEOUT_S = float(os.environ.get("LTE_SIGNAL_TIMEOUT_S", "5.0"))
 
 # "Staleness" thresholds (seconds)
 REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
@@ -648,21 +655,25 @@ class OnicsController:
         self._system_backoff_until = 0.0
 
     @staticmethod
-    def _parse_lte_rssi(output: str) -> Optional[float]:
-        lines = output.splitlines()
-        for idx, line in enumerate(lines):
-            if "RSSI:" not in line:
-                continue
-            if idx + 1 >= len(lines):
-                return None
-            match = re.search(r"'(?P<rssi>-?\d+(?:\.\d+)?) dBm'", lines[idx + 1])
-            if match:
-                return float(match.group("rssi"))
-        return None
+    def _parse_lte_signal_output(output: str) -> Tuple[Optional[float], Optional[float]]:
+        match = re.search(
+            r"RSSI:\s*(?P<rssi>-?\d+(?:\.\d+)?)\s*dBm,\s*Signal Strength:\s*(?P<percent>\d+(?:\.\d+)?)%",
+            output,
+        )
+        if not match:
+            return None, None
+        return float(match.group("rssi")), float(match.group("percent"))
 
     def _lte_signal_stats(self) -> Dict[str, Any]:
         now_m = monotonic_s()
-        if (now_m - self._last_lte_check) < LTE_SIGNAL_CHECK_S and self._lte_signal_cache:
+        interval_s = LTE_SIGNAL_CHECK_S
+        try:
+            load_avg = os.getloadavg()[0]
+        except OSError:
+            load_avg = None
+        if load_avg is not None and load_avg > LTE_SIGNAL_LOAD_THRESHOLD:
+            interval_s = max(LTE_SIGNAL_CHECK_HIGH_LOAD_S, LTE_SIGNAL_CHECK_S)
+        if (now_m - self._last_lte_check) < interval_s and self._lte_signal_cache:
             return dict(self._lte_signal_cache)
         self._last_lte_check = now_m
 
@@ -672,44 +683,49 @@ class OnicsController:
             "lte_signal_error": "LTE signal unavailable.",
         }
 
-        exe = which_or_none("qmicli")
-        if not exe:
-            stats["lte_signal_error"] = "qmicli not found."
+        if not os.path.isfile(LTE_SIGNAL_SCRIPT):
+            stats["lte_signal_error"] = f"LTE signal script not found: {LTE_SIGNAL_SCRIPT}"
             self._lte_signal_cache = stats
             return dict(stats)
 
-        cmd = [exe, f"--device={LTE_QMICLI_DEVICE}", "--nas-get-signal-strength"]
+        bash_exe = which_or_none("bash")
+        if not bash_exe:
+            stats["lte_signal_error"] = "bash not found."
+            self._lte_signal_cache = stats
+            return dict(stats)
+
+        cmd = [bash_exe, LTE_SIGNAL_SCRIPT]
         try:
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=LTE_QMICLI_TIMEOUT_S,
+                timeout=LTE_SIGNAL_TIMEOUT_S,
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            stats["lte_signal_error"] = f"qmicli error: {exc}"
+            stats["lte_signal_error"] = f"LTE signal script error: {exc}"
             self._lte_signal_cache = stats
             return dict(stats)
 
-        output = (proc.stdout or "") + (proc.stderr or "")
+        output = proc.stdout or ""
         if proc.returncode != 0:
-            stats["lte_signal_error"] = f"qmicli failed with exit code {proc.returncode}."
+            error_output = (proc.stderr or "").strip()
+            suffix = f" ({error_output})" if error_output else ""
+            stats["lte_signal_error"] = (
+                f"LTE signal script failed with exit code {proc.returncode}{suffix}."
+            )
             self._lte_signal_cache = stats
             return dict(stats)
 
-        rssi = self._parse_lte_rssi(output)
-        if rssi is None:
-            stats["lte_signal_error"] = "Could not parse RSSI."
+        rssi, percent = self._parse_lte_signal_output(output)
+        if rssi is None or percent is None:
+            stats["lte_signal_error"] = "Could not parse LTE signal output."
             self._lte_signal_cache = stats
             return dict(stats)
-
-        clamped = max(min(rssi, LTE_RSSI_MAX), LTE_RSSI_MIN)
-        denominator = LTE_RSSI_MAX - LTE_RSSI_MIN
-        percent = 0.0 if denominator == 0 else ((clamped - LTE_RSSI_MIN) / denominator) * 100.0
 
         stats["lte_signal_percent"] = round(percent, 2)
-        stats["lte_rssi_dbm"] = round(clamped, 2)
+        stats["lte_rssi_dbm"] = round(rssi, 2)
         stats["lte_signal_error"] = ""
         self._lte_signal_cache = stats
         return dict(stats)
