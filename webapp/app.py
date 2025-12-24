@@ -101,12 +101,10 @@ LTE_SIGNAL_CHECK_HIGH_LOAD_S = float(
 )
 LTE_SIGNAL_LOAD_THRESHOLD = float(os.environ.get("LTE_SIGNAL_LOAD_THRESHOLD", "4.0"))
 SYSTEM_STATS_CHECK_S = float(os.environ.get("SYSTEM_STATS_CHECK_S", "5.0"))
-LTE_SIGNAL_SCRIPT = os.path.abspath(
-    os.environ.get(
-        "LTE_SIGNAL_SCRIPT",
-        os.path.join(os.path.dirname(__file__), "..", "util", "lte-signal-strength.sh"),
-    )
-)
+REMOTE_LTE_SIGNAL_SCRIPT = os.environ.get(
+    "WATNE_LTE_SIGNAL_SCRIPT",
+    "~/Aeronomicon/util/lte-signal-strength.sh",
+).strip()
 LTE_SIGNAL_TIMEOUT_S = float(os.environ.get("LTE_SIGNAL_TIMEOUT_S", "5.0"))
 
 # "Staleness" thresholds (seconds)
@@ -683,37 +681,51 @@ class OnicsController:
             "lte_signal_error": "LTE signal unavailable.",
         }
 
-        if not os.path.isfile(LTE_SIGNAL_SCRIPT):
-            stats["lte_signal_error"] = f"LTE signal script not found: {LTE_SIGNAL_SCRIPT}"
-            self._lte_signal_cache = stats
-            return dict(stats)
+        client: Optional[paramiko.SSHClient]
+        created = False
+        with self._lock:
+            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
 
-        bash_exe = which_or_none("bash")
-        if not bash_exe:
-            stats["lte_signal_error"] = "bash not found."
-            self._lte_signal_cache = stats
-            return dict(stats)
+        if client is None:
+            client, err, _ms = self._ssh_connect()
+            if client is None:
+                self._mark_failure()
+                self._handle_ssh_failure(err)
+                stats["lte_signal_error"] = f"SSH error: {err}"
+                self._lte_signal_cache = stats
+                return dict(stats)
+            created = True
 
-        cmd = [bash_exe, LTE_SIGNAL_SCRIPT]
+        cmd = f"bash -lc {shlex.quote(REMOTE_LTE_SIGNAL_SCRIPT)}"
         try:
-            proc = subprocess.run(
+            _stdin, stdout, stderr = client.exec_command(
                 cmd,
-                capture_output=True,
-                text=True,
+                get_pty=False,
                 timeout=LTE_SIGNAL_TIMEOUT_S,
-                check=False,
             )
-        except (OSError, subprocess.SubprocessError) as exc:
-            stats["lte_signal_error"] = f"LTE signal script error: {exc}"
+            output = stdout.read().decode("utf-8", errors="replace")
+            error_output = stderr.read().decode("utf-8", errors="replace").strip()
+            status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+        except Exception as exc:
+            stats["lte_signal_error"] = f"Remote LTE signal error: {exc}"
             self._lte_signal_cache = stats
+            if created and client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
             return dict(stats)
+        finally:
+            if created and client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
 
-        output = proc.stdout or ""
-        if proc.returncode != 0:
-            error_output = (proc.stderr or "").strip()
+        if status != 0:
             suffix = f" ({error_output})" if error_output else ""
             stats["lte_signal_error"] = (
-                f"LTE signal script failed with exit code {proc.returncode}{suffix}."
+                f"Remote LTE signal script failed with exit code {status}{suffix}."
             )
             self._lte_signal_cache = stats
             return dict(stats)
