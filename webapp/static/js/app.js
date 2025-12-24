@@ -510,6 +510,7 @@ function updateTelemetryCards() {
     const autopilotStale = autopilotAgeSeconds === null || autopilotAgeSeconds > TELEMETRY_HEARTBEAT_S;
     const autopilotDisplay =
       telemetryFresh && autopilotStale ? "NO ALERTS" : telemetryState.autopilotMessage;
+    const autopilotLevel = autopilotStale ? null : telemetryState.autopilotLevel;
     const autopilotTimestamp = telemetryFresh
       ? telemetryState.lastTelemetryTimestamp
       : telemetryState.autopilotTimestamp;
@@ -522,9 +523,9 @@ function updateTelemetryCards() {
       autopilotMeta.textContent = "No autopilot alerts yet.";
       setAgeSeverity(autopilotMeta, null);
     }
-    if (telemetryState.autopilotLevel === "CRITICAL") {
+    if (autopilotLevel === "CRITICAL") {
       setCardState(cards.autopilot, "danger");
-    } else if (telemetryState.autopilotLevel === "WARNING") {
+    } else if (autopilotLevel === "WARNING") {
       setCardState(cards.autopilot, "warn");
     } else if (autopilotDisplay) {
       setCardState(cards.autopilot, telemetryFresh && autopilotStale ? "ok" : null);
