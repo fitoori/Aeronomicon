@@ -298,7 +298,7 @@ body.is-offline .shell {
 
 .toolbar__items {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
 }
 
@@ -499,9 +499,23 @@ body.is-offline .shell {
 
 .health-card__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.health-card__badge {
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #bbf7d0;
+  background: rgba(15, 23, 20, 0.8);
+  border-radius: 999px;
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  white-space: nowrap;
 }
 
 .health-card__header-actions {
@@ -527,6 +541,10 @@ body.is-offline .shell {
   margin: 0.3rem 0 0;
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+.health-card__meta--muted {
+  color: rgba(148, 163, 184, 0.9);
 }
 
 
