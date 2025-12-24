@@ -432,7 +432,11 @@ const telemetryState = {
   autopilotLevel: null,
   autopilotMessage: null,
   autopilotTimestamp: null,
+  lastTelemetryTimestamp: null,
 };
+
+const TELEMETRY_HEARTBEAT_S = 10;
+let lastEngagedState = null;
 
 const startupStages = [
   { regex: /Connecting to Realsense camera/i, label: "Connecting Realsense" },
@@ -462,6 +466,10 @@ function formatLogTimestamp(line) {
 }
 
 function updateTelemetryCards() {
+  const telemetryAgeSeconds = ageSecondsFromTimestamp(telemetryState.lastTelemetryTimestamp);
+  const telemetryFresh =
+    telemetryAgeSeconds !== null && telemetryAgeSeconds <= TELEMETRY_HEARTBEAT_S;
+
   if (trackingConfidence && trackingMeta) {
     trackingConfidence.textContent =
       telemetryState.trackingConfidence || "Awaiting telemetry";
@@ -477,23 +485,37 @@ function updateTelemetryCards() {
   }
 
   if (startupStage && startupMeta) {
-    startupStage.textContent = telemetryState.startupStage || "Awaiting telemetry";
-    if (telemetryState.startupTimestamp) {
-      const startupAge = formatTimestamp(telemetryState.startupTimestamp);
+    const startupAgeSeconds = ageSecondsFromTimestamp(telemetryState.startupTimestamp);
+    const startupDisplay =
+      telemetryFresh && (!telemetryState.startupStage || startupAgeSeconds > TELEMETRY_HEARTBEAT_S)
+        ? "RUNNING"
+        : telemetryState.startupStage;
+    const startupTimestamp = telemetryFresh
+      ? telemetryState.lastTelemetryTimestamp
+      : telemetryState.startupTimestamp;
+    startupStage.textContent = startupDisplay || "Awaiting telemetry";
+    if (startupTimestamp) {
+      const startupAge = formatTimestamp(startupTimestamp);
       startupMeta.textContent = startupAge.text;
       setAgeSeverity(startupMeta, startupAge.ageSeconds);
     } else {
       startupMeta.textContent = "No startup milestones yet.";
       setAgeSeverity(startupMeta, null);
     }
-    setCardState(cards.startup, telemetryState.startupStage ? "ok" : null);
+    setCardState(cards.startup, startupDisplay ? "ok" : null);
   }
 
   if (autopilotAlert && autopilotMeta) {
-    autopilotAlert.textContent =
-      telemetryState.autopilotMessage || "Awaiting telemetry";
-    if (telemetryState.autopilotTimestamp) {
-      const autopilotAge = formatTimestamp(telemetryState.autopilotTimestamp);
+    const autopilotAgeSeconds = ageSecondsFromTimestamp(telemetryState.autopilotTimestamp);
+    const autopilotStale = autopilotAgeSeconds === null || autopilotAgeSeconds > TELEMETRY_HEARTBEAT_S;
+    const autopilotDisplay =
+      telemetryFresh && autopilotStale ? "NO ALERTS" : telemetryState.autopilotMessage;
+    const autopilotTimestamp = telemetryFresh
+      ? telemetryState.lastTelemetryTimestamp
+      : telemetryState.autopilotTimestamp;
+    autopilotAlert.textContent = autopilotDisplay || "Awaiting telemetry";
+    if (autopilotTimestamp) {
+      const autopilotAge = formatTimestamp(autopilotTimestamp);
       autopilotMeta.textContent = autopilotAge.text;
       setAgeSeverity(autopilotMeta, autopilotAge.ageSeconds);
     } else {
@@ -504,8 +526,8 @@ function updateTelemetryCards() {
       setCardState(cards.autopilot, "danger");
     } else if (telemetryState.autopilotLevel === "WARNING") {
       setCardState(cards.autopilot, "warn");
-    } else if (telemetryState.autopilotMessage) {
-      setCardState(cards.autopilot, null);
+    } else if (autopilotDisplay) {
+      setCardState(cards.autopilot, telemetryFresh && autopilotStale ? "ok" : null);
     } else {
       setCardState(cards.autopilot, null);
     }
@@ -548,6 +570,10 @@ function parseTelemetry(line) {
     autopilotUpdated = true;
   }
 
+  if (trackingUpdated || startupUpdated || autopilotUpdated) {
+    telemetryState.lastTelemetryTimestamp = timestamp;
+  }
+
   updateTelemetryCards();
 
   if (trackingUpdated) {
@@ -559,6 +585,18 @@ function parseTelemetry(line) {
   if (autopilotUpdated) {
     pulseCard(cards.autopilot);
   }
+}
+
+function resetTelemetryState() {
+  telemetryState.trackingConfidence = null;
+  telemetryState.trackingTimestamp = null;
+  telemetryState.startupStage = null;
+  telemetryState.startupTimestamp = null;
+  telemetryState.autopilotLevel = null;
+  telemetryState.autopilotMessage = null;
+  telemetryState.autopilotTimestamp = null;
+  telemetryState.lastTelemetryTimestamp = null;
+  updateTelemetryCards();
 }
 
 function setLoginPrompt(meta, onics) {
@@ -607,6 +645,14 @@ function updateSnapshot(snapshot) {
 
   const { meta, health, onics, autopilot } = snapshot;
   setLoginPrompt(meta, onics);
+  if (onics) {
+    if (lastEngagedState === null) {
+      lastEngagedState = onics.engaged;
+    } else if (lastEngagedState && !onics.engaged) {
+      resetTelemetryState();
+    }
+    lastEngagedState = onics.engaged;
+  }
 
   const linkDegraded =
     health?.los ||
@@ -837,14 +883,7 @@ clearBtn?.addEventListener("click", async () => {
   try {
     const data = await sendCommand("/api/clear");
     logView.innerHTML = "";
-    telemetryState.trackingConfidence = null;
-    telemetryState.trackingTimestamp = null;
-    telemetryState.startupStage = null;
-    telemetryState.startupTimestamp = null;
-    telemetryState.autopilotLevel = null;
-    telemetryState.autopilotMessage = null;
-    telemetryState.autopilotTimestamp = null;
-    updateTelemetryCards();
+    resetTelemetryState();
     updateSnapshot(data.snapshot);
   } catch (err) {
     appendLog(`CLEAR FAILED: ${err.message}`);
