@@ -54,8 +54,6 @@ const headerLoad = document.getElementById("header-load");
 const headerLoadGraph = document.getElementById("header-load-graph");
 const headerMemory = document.getElementById("header-memory");
 const headerDisk = document.getElementById("header-disk");
-const pinSectionSelect = document.getElementById("pin-section-select");
-const pinHost = document.getElementById("pin-host");
 
 let engageToggleAction = null;
 let rebootPending = false;
@@ -330,73 +328,6 @@ function recordLoadPoint(value, cpuCount) {
   drawAllLoadGraphs();
 }
 
-const pinSections = new Map();
-let currentPinnedSection = null;
-
-function setupPinSections() {
-  if (!pinHost) {
-    return;
-  }
-  document.querySelectorAll("[data-pin-section]").forEach((section) => {
-    const key = section.getAttribute("data-pin-section");
-    if (!key) {
-      return;
-    }
-    const placeholder = document.createElement("span");
-    placeholder.className = "pin-placeholder";
-    placeholder.setAttribute("aria-hidden", "true");
-    section.after(placeholder);
-    section.hidden = true;
-    pinSections.set(key, {
-      element: section,
-      placeholder,
-    });
-  });
-}
-
-function restoreSection(key) {
-  const entry = pinSections.get(key);
-  if (!entry) {
-    return;
-  }
-  const { element, placeholder } = entry;
-  if (placeholder.parentElement) {
-    placeholder.parentElement.insertBefore(element, placeholder);
-  }
-  element.hidden = true;
-}
-
-function pinSection(key) {
-  if (!pinHost || !pinSections.has(key)) {
-    return;
-  }
-  if (currentPinnedSection && currentPinnedSection !== key) {
-    restoreSection(currentPinnedSection);
-  }
-  const entry = pinSections.get(key);
-  entry.element.hidden = false;
-  pinHost.appendChild(entry.element);
-  currentPinnedSection = key;
-}
-
-function applyPinnedSection(value) {
-  const key = value || "tailscale";
-  if (!pinSections.has(key)) {
-    return;
-  }
-  pinSections.forEach((entry) => {
-    entry.element.hidden = true;
-  });
-  pinSection(key);
-  if (pinSectionSelect) {
-    pinSectionSelect.value = key;
-  }
-  try {
-    localStorage.setItem("pinnedSection", key);
-  } catch (err) {
-    console.warn("Unable to persist pinned section", err);
-  }
-}
 
 function formatSystemSummary(system) {
   if (!system) {
@@ -1057,25 +988,6 @@ eventSource.onerror = () => {
     setRebootOverlay(true);
   }
 };
-
-setupPinSections();
-
-if (pinSectionSelect) {
-  const saved = (() => {
-    try {
-      return localStorage.getItem("pinnedSection");
-    } catch (err) {
-      return null;
-    }
-  })();
-  const initial = saved || pinSectionSelect.value;
-  applyPinnedSection(initial);
-  pinSectionSelect.addEventListener("change", (event) => {
-    applyPinnedSection(event.target.value);
-  });
-} else {
-  applyPinnedSection("tailscale");
-}
 
 if (loadGraphs.length) {
   const resizeObserver = new ResizeObserver(() => {
