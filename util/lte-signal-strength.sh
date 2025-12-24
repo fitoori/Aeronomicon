@@ -10,9 +10,23 @@ set -euo pipefail
 RSSI_MIN=-113
 RSSI_MAX=-51
 
-# Run qmicli command with error checking
-OUTPUT=$(sudo qmicli --device=/dev/cdc-wdm0 --nas-get-signal-strength 2>&1)
-EXIT_CODE=$?
+# Run qmicli command with error checking. Prefer direct invocation and
+# fall back to non-interactive sudo if available.
+OUTPUT=""
+EXIT_CODE=0
+
+if OUTPUT=$(qmicli --device=/dev/cdc-wdm0 --nas-get-signal-strength 2>&1); then
+  EXIT_CODE=0
+else
+  EXIT_CODE=$?
+  if command -v sudo >/dev/null 2>&1; then
+    if OUTPUT=$(sudo -n qmicli --device=/dev/cdc-wdm0 --nas-get-signal-strength 2>&1); then
+      EXIT_CODE=0
+    else
+      EXIT_CODE=$?
+    fi
+  fi
+fi
 
 if [ $EXIT_CODE -ne 0 ]; then
   echo "ERROR: qmicli command failed with exit code $EXIT_CODE."
