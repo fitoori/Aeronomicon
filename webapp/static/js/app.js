@@ -48,11 +48,13 @@ const systemLoadMeta = document.getElementById("system-load-meta");
 const systemLoadGraph = document.getElementById("system-load-graph");
 const systemMemory = document.getElementById("system-memory");
 const systemMemoryMeta = document.getElementById("system-memory-meta");
+const systemMemoryGraph = document.getElementById("system-memory-graph");
 const systemDisk = document.getElementById("system-disk");
 const systemDiskMeta = document.getElementById("system-disk-meta");
 const headerLoad = document.getElementById("header-load");
 const headerLoadGraph = document.getElementById("header-load-graph");
 const headerMemory = document.getElementById("header-memory");
+const headerMemoryGraph = document.getElementById("header-memory-graph");
 const headerDisk = document.getElementById("header-disk");
 const pinSectionSelect = document.getElementById("pin-section-select");
 const pinHost = document.getElementById("pin-host");
@@ -253,7 +255,25 @@ function pruneLoadHistory(nowMs) {
   }
 }
 
-function resizeLoadGraph(graph) {
+const memoryHistory = [];
+const memoryHistoryWindowMs = 5 * 60 * 1000;
+let memoryHistoryTotal = null;
+const memoryGraphs = [systemMemoryGraph, headerMemoryGraph]
+  .filter(Boolean)
+  .map((canvas) => ({
+    canvas,
+    context: canvas.getContext("2d"),
+  }))
+  .filter((graph) => graph.context);
+
+function pruneMemoryHistory(nowMs) {
+  const cutoff = nowMs - memoryHistoryWindowMs;
+  while (memoryHistory.length && memoryHistory[0].ts < cutoff) {
+    memoryHistory.shift();
+  }
+}
+
+function resizeGraph(graph) {
   if (!graph?.canvas || !graph?.context) {
     return;
   }
@@ -273,7 +293,7 @@ function drawLoadGraph(graph) {
   }
   const now = Date.now();
   pruneLoadHistory(now);
-  resizeLoadGraph(graph);
+  resizeGraph(graph);
 
   const width = graph.canvas.clientWidth;
   const height = graph.canvas.clientHeight;
@@ -318,6 +338,54 @@ function drawAllLoadGraphs() {
   });
 }
 
+function drawMemoryGraph(graph) {
+  if (!graph?.canvas || !graph?.context) {
+    return;
+  }
+  const now = Date.now();
+  pruneMemoryHistory(now);
+  resizeGraph(graph);
+
+  const width = graph.canvas.clientWidth;
+  const height = graph.canvas.clientHeight;
+  if (!width || !height) {
+    return;
+  }
+
+  graph.context.clearRect(0, 0, width, height);
+
+  if (!memoryHistory.length) {
+    return;
+  }
+
+  const historyMax = Math.max(1, ...memoryHistory.map((entry) => entry.value));
+  const totalMax = Number.isFinite(memoryHistoryTotal) ? Math.max(memoryHistoryTotal, 1) : historyMax;
+  const paddedMax = totalMax * 1.05;
+  const start = now - memoryHistoryWindowMs;
+
+  graph.context.strokeStyle = "rgba(96, 165, 250, 0.85)";
+  graph.context.lineWidth = 2;
+  graph.context.beginPath();
+
+  memoryHistory.forEach((entry, index) => {
+    const x = ((entry.ts - start) / memoryHistoryWindowMs) * width;
+    const y = height - Math.min(entry.value / paddedMax, 1) * height;
+    if (index === 0) {
+      graph.context.moveTo(x, y);
+    } else {
+      graph.context.lineTo(x, y);
+    }
+  });
+
+  graph.context.stroke();
+}
+
+function drawAllMemoryGraphs() {
+  memoryGraphs.forEach((graph) => {
+    drawMemoryGraph(graph);
+  });
+}
+
 function recordLoadPoint(value, cpuCount) {
   if (!Number.isFinite(value)) {
     return;
@@ -328,6 +396,18 @@ function recordLoadPoint(value, cpuCount) {
   loadHistory.push({ ts: Date.now(), value: Number(value) });
   pruneLoadHistory(Date.now());
   drawAllLoadGraphs();
+}
+
+function recordMemoryPoint(value, total) {
+  if (!Number.isFinite(value)) {
+    return;
+  }
+  if (Number.isFinite(total)) {
+    memoryHistoryTotal = total;
+  }
+  memoryHistory.push({ ts: Date.now(), value: Number(value) });
+  pruneMemoryHistory(Date.now());
+  drawAllMemoryGraphs();
 }
 
 const pinSections = new Map();
@@ -878,6 +958,10 @@ function updateSnapshot(snapshot, options = {}) {
       }
     }
 
+    if (system.mem_used_bytes !== null && system.mem_used_bytes !== undefined) {
+      recordMemoryPoint(system.mem_used_bytes, system.mem_total_bytes);
+    }
+
     if (systemDisk) {
       if (system.disk_total_bytes !== null && system.disk_total_bytes !== undefined) {
         systemDisk.textContent = `${formatBytes(system.disk_used_bytes ?? 0)} / ${formatBytes(
@@ -1077,15 +1161,24 @@ if (pinSectionSelect) {
   applyPinnedSection("tailscale");
 }
 
-if (loadGraphs.length) {
+const metricGraphs = [...loadGraphs, ...memoryGraphs];
+
+if (metricGraphs.length) {
   const resizeObserver = new ResizeObserver(() => {
     drawAllLoadGraphs();
+    drawAllMemoryGraphs();
   });
-  loadGraphs.forEach((graph) => {
+  metricGraphs.forEach((graph) => {
     resizeObserver.observe(graph.canvas);
   });
-  window.addEventListener("resize", drawAllLoadGraphs);
-  setInterval(drawAllLoadGraphs, 1000);
+  window.addEventListener("resize", () => {
+    drawAllLoadGraphs();
+    drawAllMemoryGraphs();
+  });
+  setInterval(() => {
+    drawAllLoadGraphs();
+    drawAllMemoryGraphs();
+  }, 1000);
 }
 
 fetch("/api/snapshot")
