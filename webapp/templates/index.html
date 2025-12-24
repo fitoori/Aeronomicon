@@ -112,21 +112,8 @@
         <div class="shell__status" id="connection-pill">LINK: INIT</div>
       </header>
 
-      <section class="grid">
-        <article class="panel">
-          <header class="panel__header panel__header--actions">
-            <h2>Telemetry Log</h2>
-            <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
-          </header>
-          <div class="panel__body panel__body--logs">
-            <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
-          </div>
-        </article>
-      </section>
-
       <section class="pin-area">
         <div class="pin-area__controls">
-          <h2>Pin Top Section</h2>
           <div class="pin-area__control">
             <label for="pin-section-select">Pinned</label>
             <select id="pin-section-select" class="pin-area__select">
@@ -137,6 +124,18 @@
           </div>
         </div>
         <div class="pin-host" id="pin-host"></div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <header class="panel__header panel__header--actions">
+            <h2>Telemetry Log</h2>
+            <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
+          </header>
+          <div class="panel__body panel__body--logs">
+            <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
+          </div>
+        </article>
       </section>
 
       <section class="toolbar-grid">

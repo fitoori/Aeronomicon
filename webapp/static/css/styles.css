@@ -204,7 +204,7 @@ body.is-offline .shell {
 }
 
 .shell__stat-card .health-card__value {
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   color: #f1f8f4;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
