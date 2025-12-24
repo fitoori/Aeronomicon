@@ -615,13 +615,24 @@ body.is-offline .shell {
   pointer-events: none;
 }
 
-.reboot-screen {
+.offline-screen {
   position: fixed;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-direction: column;
+  gap: 16px;
+  background: radial-gradient(circle, rgba(10, 18, 14, 0.92), rgba(3, 6, 5, 0.98));
+  z-index: 998;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+body.is-offline .offline-screen {
+  opacity: 1;
+  pointer-events: auto;
   gap: 20px;
   background: radial-gradient(circle, rgba(10, 18, 14, 0.96), rgba(3, 6, 5, 0.98));
   z-index: 998;

@@ -2,6 +2,7 @@ const engageToggleBtn = document.getElementById("engage-toggle-btn");
 const clearBtn = document.getElementById("clear-btn");
 const logView = document.getElementById("log-view");
 const loadingScreen = document.getElementById("loading-screen");
+const offlineScreen = document.getElementById("offline-screen");
 const rebootScreen = document.getElementById("reboot-screen");
 const connectionPill = document.getElementById("connection-pill");
 const logoMenuButton = document.getElementById("logo-menu-button");
@@ -93,6 +94,9 @@ const cards = {
 
 function setOfflineState(isOffline) {
   document.body.classList.toggle("is-offline", isOffline);
+  if (offlineScreen) {
+    offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
+  }
 }
 
 function setCardState(card, state) {
