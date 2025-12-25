@@ -389,6 +389,11 @@ body.is-offline .shell {
   color: #bbf7d0;
 }
 
+.btn--service-stop {
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #fecaca;
+}
+
 .btn:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);

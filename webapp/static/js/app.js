@@ -18,6 +18,7 @@ const loginKeygenCommand = document.getElementById("login-keygen-command");
 const loginOpenBtn = document.getElementById("login-open-btn");
 const loginDismissBtn = document.getElementById("login-dismiss-btn");
 const serviceRestartButtons = document.querySelectorAll("[data-service-restart]");
+const serviceStopButtons = document.querySelectorAll("[data-service-stop]");
 
 const tailscaleStatus = document.getElementById("tailscale-status");
 const tailscaleBackend = document.getElementById("tailscale-backend");
@@ -916,6 +917,12 @@ function updateSnapshot(snapshot, options = {}) {
   serviceRestartButtons.forEach((button) => {
     button.disabled = !restartReady;
   });
+  serviceStopButtons.forEach((button) => {
+    const serviceKey = button.getAttribute("data-service-stop");
+    const service = serviceKey ? autopilot?.services?.[serviceKey] : null;
+    const canStop = restartReady && service?.active;
+    button.disabled = !canStop;
+  });
   if (rebootBtn) {
     rebootBtn.disabled = !restartReady;
   }
@@ -985,6 +992,25 @@ serviceRestartButtons.forEach((button) => {
       appendLog(`RESTART REQUESTED: ${service}`);
     } catch (err) {
       appendLog(`RESTART FAILED (${service}): ${err.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+});
+
+serviceStopButtons.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const service = button.getAttribute("data-service-stop");
+    if (!service) {
+      return;
+    }
+    button.disabled = true;
+    try {
+      const data = await sendCommand(`/api/services/${service}/stop`);
+      updateSnapshot(data.snapshot);
+      appendLog(`STOP REQUESTED: ${service}`);
+    } catch (err) {
+      appendLog(`STOP FAILED (${service}): ${err.message}`);
     } finally {
       button.disabled = false;
     }
