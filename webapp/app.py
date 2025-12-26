@@ -572,6 +572,7 @@ class OnicsController:
             "disk_free_bytes": None,
             "network_active_interface": "",
             "network_interfaces": cls._blank_network_interfaces(),
+            "uptime_s": None,
             "wwan_rx_bytes": None,
             "wwan_tx_bytes": None,
             "wwan_metered_rx_bytes": 0,
@@ -703,6 +704,11 @@ class OnicsController:
                         stats["wwan_tx_bytes"] = int(value.strip())
                     except ValueError:
                         pass
+                elif key == "uptime_s":
+                    try:
+                        stats["uptime_s"] = float(value.strip())
+                    except ValueError:
+                        pass
 
         return stats
 
@@ -738,11 +744,22 @@ class OnicsController:
             "done; "
             "echo \"---\"; "
             "if [ -d /sys/class/net/wwan0 ]; then "
+            "ifconfig_out=$(ifconfig wwan0 2>/dev/null); "
+            "wwan_rx=$(echo \"$ifconfig_out\" | "
+            "sed -n 's/.*RX packets [0-9]* *bytes \\([0-9]*\\).*/\\1/p; "
+            "s/.*RX bytes:\\([0-9]*\\).*/\\1/p' | head -n 1); "
+            "wwan_tx=$(echo \"$ifconfig_out\" | "
+            "sed -n 's/.*TX packets [0-9]* *bytes \\([0-9]*\\).*/\\1/p; "
+            "s/.*TX bytes:\\([0-9]*\\).*/\\1/p' | head -n 1); "
+            "if [ -z \"$wwan_rx\" ] || [ -z \"$wwan_tx\" ]; then "
             "wwan_rx=$(cat /sys/class/net/wwan0/statistics/rx_bytes 2>/dev/null); "
             "wwan_tx=$(cat /sys/class/net/wwan0/statistics/tx_bytes 2>/dev/null); "
+            "fi; "
             "echo \"wwan_rx=${wwan_rx:-0}\"; "
             "echo \"wwan_tx=${wwan_tx:-0}\"; "
-            "else echo \"wwan_rx=\"; echo \"wwan_tx=\"; fi'"
+            "else echo \"wwan_rx=\"; echo \"wwan_tx=\"; fi; "
+            "uptime_s=$(cut -d' ' -f1 /proc/uptime 2>/dev/null); "
+            "echo \"uptime_s=${uptime_s:-}\"; '"
         )
         _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
         output = stdout.read().decode("utf-8", errors="replace")
@@ -798,52 +815,30 @@ class OnicsController:
         active_iface = stats.get("network_active_interface")
         rx_bytes = stats.get("wwan_rx_bytes")
         tx_bytes = stats.get("wwan_tx_bytes")
-        now_m = monotonic_s()
-
-        last_rx = self._wwan_meter.get("last_rx")
-        last_tx = self._wwan_meter.get("last_tx")
-        last_mono = self._wwan_meter.get("last_mono")
+        uptime_s = stats.get("uptime_s")
 
         has_sample = isinstance(rx_bytes, int) and isinstance(tx_bytes, int)
-        if has_sample and active_iface == "wwan0":
-            if isinstance(last_rx, int) and isinstance(last_tx, int) and last_mono is not None:
-                delta_rx = max(0, rx_bytes - last_rx)
-                delta_tx = max(0, tx_bytes - last_tx)
-                delta_total = delta_rx + delta_tx
-                self._wwan_meter["rx"] += delta_rx
-                self._wwan_meter["tx"] += delta_tx
-                self._wwan_meter["total"] += delta_total
-                elapsed = max(now_m - float(last_mono), 0.0)
-                self._wwan_meter["rate_bps"] = (
-                    (delta_total / elapsed) if elapsed > 0 else 0.0
-                )
-            else:
-                self._wwan_meter["rate_bps"] = 0.0
-        else:
-            self._wwan_meter["rate_bps"] = 0.0
+        total_bytes = rx_bytes + tx_bytes if has_sample else 0
 
-        if has_sample:
-            self._wwan_meter["last_mono"] = now_m
-
-        if isinstance(rx_bytes, int):
-            self._wwan_meter["last_rx"] = rx_bytes
-        if isinstance(tx_bytes, int):
-            self._wwan_meter["last_tx"] = tx_bytes
-
-        if has_sample:
-            self._wwan_meter_history.append((now_m, int(self._wwan_meter["total"])))
-            cutoff = now_m - 60.0
-            while self._wwan_meter_history and self._wwan_meter_history[0][0] < cutoff:
-                self._wwan_meter_history.popleft()
-            if len(self._wwan_meter_history) >= 2:
-                oldest_t, oldest_total = self._wwan_meter_history[0]
-                newest_t, newest_total = self._wwan_meter_history[-1]
-                elapsed = max(newest_t - oldest_t, 0.0)
-                avg_rate = (newest_total - oldest_total) / elapsed if elapsed > 0 else 0.0
-            else:
-                avg_rate = 0.0
+        if isinstance(uptime_s, (int, float)) and uptime_s > 0:
+            avg_rate = total_bytes / float(uptime_s)
         else:
             avg_rate = 0.0
+
+        if has_sample and active_iface == "wwan0":
+            rate_bps = avg_rate
+        else:
+            rate_bps = 0.0
+
+        if has_sample:
+            self._wwan_meter["rx"] = rx_bytes
+            self._wwan_meter["tx"] = tx_bytes
+            self._wwan_meter["total"] = total_bytes
+        else:
+            self._wwan_meter["rx"] = 0
+            self._wwan_meter["tx"] = 0
+            self._wwan_meter["total"] = 0
+        self._wwan_meter["rate_bps"] = rate_bps
 
         stats["wwan_metered_rx_bytes"] = self._wwan_meter["rx"]
         stats["wwan_metered_tx_bytes"] = self._wwan_meter["tx"]
