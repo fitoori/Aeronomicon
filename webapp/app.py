@@ -354,6 +354,15 @@ class OnicsController:
         self._service_backoff_s = 0.0
         self._system_backoff_until = 0.0
         self._system_backoff_s = 0.0
+        self._wwan_meter = {
+            "last_rx": None,
+            "last_tx": None,
+            "last_mono": None,
+            "rx": 0,
+            "tx": 0,
+            "total": 0,
+            "rate_bps": 0.0,
+        }
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -527,6 +536,12 @@ class OnicsController:
             "disk_free_bytes": None,
             "network_active_interface": "",
             "network_interfaces": cls._blank_network_interfaces(),
+            "wwan_rx_bytes": None,
+            "wwan_tx_bytes": None,
+            "wwan_metered_rx_bytes": 0,
+            "wwan_metered_tx_bytes": 0,
+            "wwan_metered_total_bytes": 0,
+            "wwan_metered_rate_bps": 0.0,
         }
 
     @classmethod
@@ -636,6 +651,22 @@ class OnicsController:
             stats["network_active_interface"] = active_iface
             stats["network_interfaces"] = interfaces
 
+        if len(parts) >= 6:
+            for line in parts[5].splitlines():
+                if not line.strip():
+                    continue
+                key, _, value = line.partition("=")
+                if key == "wwan_rx":
+                    try:
+                        stats["wwan_rx_bytes"] = int(value.strip())
+                    except ValueError:
+                        pass
+                elif key == "wwan_tx":
+                    try:
+                        stats["wwan_tx_bytes"] = int(value.strip())
+                    except ValueError:
+                        pass
+
         return stats
 
     def _fetch_remote_system_stats(self, client: paramiko.SSHClient) -> Dict[str, Any]:
@@ -667,7 +698,14 @@ class OnicsController:
             "awk \"{print \\$4}\" | head -n 1); "
             "echo \"$iface|$state|$carrier|$ipv4|$ipv6\"; "
             "else echo \"$iface|missing|||\"; fi; "
-            "done'"
+            "done; "
+            "echo \"---\"; "
+            "if [ -d /sys/class/net/wwan0 ]; then "
+            "wwan_rx=$(cat /sys/class/net/wwan0/statistics/rx_bytes 2>/dev/null); "
+            "wwan_tx=$(cat /sys/class/net/wwan0/statistics/tx_bytes 2>/dev/null); "
+            "echo \"wwan_rx=${wwan_rx:-0}\"; "
+            "echo \"wwan_tx=${wwan_tx:-0}\"; "
+            "else echo \"wwan_rx=\"; echo \"wwan_tx=\"; fi'"
         )
         _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
         output = stdout.read().decode("utf-8", errors="replace")
@@ -712,10 +750,51 @@ class OnicsController:
                 except Exception:
                     pass
 
+        stats = self._apply_wwan_meter(stats)
+
         with self._lock:
             self._autopilot.system = stats
         self._system_backoff_s = 0.0
         self._system_backoff_until = 0.0
+
+    def _apply_wwan_meter(self, stats: Dict[str, Any]) -> Dict[str, Any]:
+        active_iface = stats.get("network_active_interface")
+        rx_bytes = stats.get("wwan_rx_bytes")
+        tx_bytes = stats.get("wwan_tx_bytes")
+        now_m = monotonic_s()
+
+        last_rx = self._wwan_meter.get("last_rx")
+        last_tx = self._wwan_meter.get("last_tx")
+        last_mono = self._wwan_meter.get("last_mono")
+
+        if active_iface == "wwan0" and isinstance(rx_bytes, int) and isinstance(tx_bytes, int):
+            if isinstance(last_rx, int) and isinstance(last_tx, int) and last_mono is not None:
+                delta_rx = max(0, rx_bytes - last_rx)
+                delta_tx = max(0, tx_bytes - last_tx)
+                delta_total = delta_rx + delta_tx
+                self._wwan_meter["rx"] += delta_rx
+                self._wwan_meter["tx"] += delta_tx
+                self._wwan_meter["total"] += delta_total
+                elapsed = max(now_m - float(last_mono), 0.0)
+                self._wwan_meter["rate_bps"] = (
+                    (delta_total / elapsed) if elapsed > 0 else 0.0
+                )
+            self._wwan_meter["last_mono"] = now_m
+        else:
+            self._wwan_meter["rate_bps"] = 0.0
+
+        if isinstance(rx_bytes, int):
+            self._wwan_meter["last_rx"] = rx_bytes
+        if isinstance(tx_bytes, int):
+            self._wwan_meter["last_tx"] = tx_bytes
+
+        stats["wwan_metered_rx_bytes"] = self._wwan_meter["rx"]
+        stats["wwan_metered_tx_bytes"] = self._wwan_meter["tx"]
+        stats["wwan_metered_total_bytes"] = self._wwan_meter["total"]
+        stats["wwan_metered_rate_bps"] = self._wwan_meter["rate_bps"]
+        stats["wwan_rx_bytes"] = rx_bytes
+        stats["wwan_tx_bytes"] = tx_bytes
+        return stats
 
     @staticmethod
     def _parse_lte_signal_output(output: str) -> Tuple[Optional[float], Optional[float]]:

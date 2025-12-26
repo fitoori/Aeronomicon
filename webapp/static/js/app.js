@@ -241,6 +241,13 @@ function formatUptime(seconds) {
 
 const networkInterfaceOrder = ["eth0", "wlan0", "wwan0"];
 
+function formatRateBps(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "n/a";
+  }
+  return `${formatBytes(Number(value))}/s`;
+}
+
 function formatNetworkInterfaceStatus(name, entry, activeName) {
   if (!entry || entry.present === false) {
     return `${name}: missing`;
@@ -942,7 +949,19 @@ function updateSnapshot(snapshot, options = {}) {
       });
       systemNetwork.textContent = activeInterface ? `Active: ${activeInterface}` : "Active: n/a";
       if (systemNetworkMeta) {
-        systemNetworkMeta.textContent = statusLines.join(" · ");
+        const meteredTotal = system.wwan_metered_total_bytes;
+        const meteredRx = system.wwan_metered_rx_bytes;
+        const meteredTx = system.wwan_metered_tx_bytes;
+        const meteredRate = system.wwan_metered_rate_bps;
+        let meterLine = "";
+        if (activeInterface === "wwan0" && Number.isFinite(meteredTotal)) {
+          const rxText = Number.isFinite(meteredRx) ? formatBytes(meteredRx) : "n/a";
+          const txText = Number.isFinite(meteredTx) ? formatBytes(meteredTx) : "n/a";
+          meterLine = `Metered ${formatBytes(meteredTotal)} (${rxText} rx / ${txText} tx) @ ${formatRateBps(
+            meteredRate
+          )}`;
+        }
+        systemNetworkMeta.textContent = [statusLines.join(" · "), meterLine].filter(Boolean).join(" · ");
       }
       if (activeConnected) {
         setCardState(cards.systemNetwork, "ok");
