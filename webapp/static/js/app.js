@@ -432,30 +432,6 @@ function recordMemoryPoint(value, total) {
   drawAllMemoryGraphs();
 }
 
-const dataRateHistory = [];
-const dataRateWindowMs = 60 * 1000;
-
-function pruneDataRateHistory(nowMs) {
-  const cutoff = nowMs - dataRateWindowMs;
-  while (dataRateHistory.length && dataRateHistory[0].ts < cutoff) {
-    dataRateHistory.shift();
-  }
-}
-
-function recordDataRate(value) {
-  const rate = Number.isFinite(Number(value)) ? Number(value) : 0;
-  dataRateHistory.push({ ts: Date.now(), value: rate });
-  pruneDataRateHistory(Date.now());
-}
-
-function averageDataRate() {
-  if (!dataRateHistory.length) {
-    return null;
-  }
-  const sum = dataRateHistory.reduce((acc, entry) => acc + entry.value, 0);
-  return sum / dataRateHistory.length;
-}
-
 
 function formatSystemSummary(system) {
   if (!system) {
@@ -895,10 +871,8 @@ function updateSnapshot(snapshot, options = {}) {
           ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
           : "n/a";
     }
-    recordDataRate(system.wwan_metered_rate_bps);
     if (headerData) {
-      const avgRate = averageDataRate();
-      headerData.textContent = avgRate === null ? "n/a" : formatRateBps(avgRate);
+      headerData.textContent = formatRateBps(system.wwan_metered_avg_bps);
     }
     if (headerDataCard) {
       headerDataCard.classList.toggle("shell__stat-card--accent", activeInterface === "wwan0");

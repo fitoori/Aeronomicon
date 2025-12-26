@@ -369,6 +369,7 @@ class OnicsController:
             "total": 0,
             "rate_bps": 0.0,
         }
+        self._wwan_meter_history: Deque[Tuple[float, int]] = deque()
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -558,6 +559,7 @@ class OnicsController:
             "wwan_metered_tx_bytes": 0,
             "wwan_metered_total_bytes": 0,
             "wwan_metered_rate_bps": 0.0,
+            "wwan_metered_avg_bps": 0.0,
         }
 
     @classmethod
@@ -809,10 +811,26 @@ class OnicsController:
         if isinstance(tx_bytes, int):
             self._wwan_meter["last_tx"] = tx_bytes
 
+        if has_sample:
+            self._wwan_meter_history.append((now_m, int(self._wwan_meter["total"])))
+            cutoff = now_m - 60.0
+            while self._wwan_meter_history and self._wwan_meter_history[0][0] < cutoff:
+                self._wwan_meter_history.popleft()
+            if len(self._wwan_meter_history) >= 2:
+                oldest_t, oldest_total = self._wwan_meter_history[0]
+                newest_t, newest_total = self._wwan_meter_history[-1]
+                elapsed = max(newest_t - oldest_t, 0.0)
+                avg_rate = (newest_total - oldest_total) / elapsed if elapsed > 0 else 0.0
+            else:
+                avg_rate = 0.0
+        else:
+            avg_rate = 0.0
+
         stats["wwan_metered_rx_bytes"] = self._wwan_meter["rx"]
         stats["wwan_metered_tx_bytes"] = self._wwan_meter["tx"]
         stats["wwan_metered_total_bytes"] = self._wwan_meter["total"]
         stats["wwan_metered_rate_bps"] = self._wwan_meter["rate_bps"]
+        stats["wwan_metered_avg_bps"] = avg_rate
         stats["wwan_rx_bytes"] = rx_bytes
         stats["wwan_tx_bytes"] = tx_bytes
         return stats
