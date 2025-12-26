@@ -37,6 +37,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "This script must be run as root." >&2
@@ -64,9 +65,20 @@ services=(
 ensure_executable_scripts
 
 for service in "${services[@]}"; do
-  service_path="${script_dir}/${service}"
+  case "${service}" in
+    mavproxy.service)
+      service_path="${repo_root}/${service}"
+      ;;
+    uplink.service)
+      service_path="${script_dir}/../${service}"
+      ;;
+    *)
+      echo "Unknown service: ${service}" >&2
+      exit 1
+      ;;
+  esac
   if [[ ! -f "${service_path}" ]]; then
-    echo "Service file ${service} not found in ${script_dir}." >&2
+    echo "Service file ${service} not found at ${service_path}." >&2
     exit 1
   fi
   install -m 644 "${service_path}" "/etc/systemd/system/${service}"
