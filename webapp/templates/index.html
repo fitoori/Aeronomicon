@@ -153,11 +153,76 @@
       <section class="grid">
         <article class="panel">
           <header class="panel__header panel__header--actions">
-            <h2>Telemetry Log</h2>
-            <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
+            <div class="panel__title-group">
+              <h2>Telemetry</h2>
+              <p>Logs and MAVLink console</p>
+            </div>
+            <div class="panel__header-actions">
+              <div class="panel__tabs" role="tablist" aria-label="Telemetry views">
+                <button
+                  class="panel__tab is-active"
+                  type="button"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="telemetry-log-panel"
+                  id="telemetry-log-tab"
+                  data-telemetry-tab="telemetry-log"
+                >
+                  Telemetry Log
+                </button>
+                <button
+                  class="panel__tab"
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="mavlink-console-panel"
+                  id="mavlink-console-tab"
+                  data-telemetry-tab="mavlink-console"
+                >
+                  MAVLink Console
+                </button>
+              </div>
+              <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
+            </div>
           </header>
-          <div class="panel__body panel__body--logs">
-            <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
+          <div class="panel__body panel__body--tabs">
+            <div
+              class="tab-panel is-active"
+              id="telemetry-log-panel"
+              role="tabpanel"
+              aria-labelledby="telemetry-log-tab"
+              data-telemetry-panel="telemetry-log"
+            >
+              <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
+            </div>
+            <div
+              class="tab-panel"
+              id="mavlink-console-panel"
+              role="tabpanel"
+              aria-labelledby="mavlink-console-tab"
+              data-telemetry-panel="mavlink-console"
+              hidden
+            >
+              <form class="mavlink-form" id="mavlink-form">
+                <label class="mavlink-form__label" for="mavlink-command">Command</label>
+                <div class="mavlink-form__row">
+                  <input
+                    class="mavlink-form__input"
+                    id="mavlink-command"
+                    type="text"
+                    autocomplete="off"
+                    placeholder="status"
+                  />
+                  <button class="btn btn--service" id="mavlink-send-btn" type="submit">
+                    Send
+                  </button>
+                </div>
+                <p class="mavlink-form__hint">Examples: status · arm throttle · disarm</p>
+              </form>
+              <div class="mavlink-output" id="mavlink-output" aria-live="polite">
+                Awaiting command.
+              </div>
+            </div>
           </div>
         </article>
       </section>
@@ -244,33 +309,6 @@
                 <p class="health-card__meta" id="uplink-signal-meta">Signal strength unavailable.</p>
                 <p class="health-card__meta" id="uplink-meta">Awaiting status.</p>
               </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel" id="mavlink-panel">
-          <header class="panel__header">
-            <h2>MAVLink Console</h2>
-          </header>
-          <div class="panel__body">
-            <form class="mavlink-form" id="mavlink-form">
-              <label class="mavlink-form__label" for="mavlink-command">Command</label>
-              <div class="mavlink-form__row">
-                <input
-                  class="mavlink-form__input"
-                  id="mavlink-command"
-                  type="text"
-                  autocomplete="off"
-                  placeholder="status"
-                />
-                <button class="btn btn--service" id="mavlink-send-btn" type="submit">
-                  Send
-                </button>
-              </div>
-              <p class="mavlink-form__hint">Examples: status · arm throttle · disarm</p>
-            </form>
-            <div class="mavlink-output" id="mavlink-output" aria-live="polite">
-              Awaiting command.
             </div>
           </div>
         </article>

@@ -83,10 +83,28 @@ const mavlinkForm = document.getElementById("mavlink-form");
 const mavlinkCommandInput = document.getElementById("mavlink-command");
 const mavlinkSendBtn = document.getElementById("mavlink-send-btn");
 const mavlinkOutput = document.getElementById("mavlink-output");
+const telemetryTabButtons = document.querySelectorAll("[data-telemetry-tab]");
+const telemetryTabPanels = document.querySelectorAll("[data-telemetry-panel]");
 
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
+
+function setTelemetryTab(tabId) {
+  telemetryTabButtons.forEach((button) => {
+    const isActive = button.dataset.telemetryTab === tabId;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+  telemetryTabPanels.forEach((panel) => {
+    const isActive = panel.dataset.telemetryPanel === tabId;
+    panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
+  });
+  if (clearBtn) {
+    clearBtn.hidden = tabId !== "telemetry-log";
+  }
+}
 
 function setLogoMenuOpen(open) {
   if (!logoMenuButton || !logoMenu) {
@@ -138,6 +156,21 @@ function setOfflineState(nextOffline) {
     if (offlineScreen) {
       offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
     }
+  }
+}
+
+telemetryTabButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setTelemetryTab(button.dataset.telemetryTab);
+  });
+});
+
+if (telemetryTabButtons.length) {
+  const defaultTab =
+    document.querySelector("[data-telemetry-tab].is-active")?.dataset.telemetryTab ||
+    telemetryTabButtons[0]?.dataset.telemetryTab;
+  if (defaultTab) {
+    setTelemetryTab(defaultTab);
   }
 }
 
