@@ -814,21 +814,34 @@ function updateSnapshot(snapshot, options = {}) {
     }
   }
   setRebootOverlay(rebootPending);
-  connectionPill.textContent = health.los
-    ? "LINK: LOS"
-    : linkDegraded
-      ? "LINK: DEGRADED"
-      : "LINK: OK";
-  connectionPill.style.borderColor = health.los
-    ? "rgba(249,115,22,0.6)"
-    : linkDegraded
-      ? "rgba(245,158,11,0.6)"
-      : "rgba(74,222,128,0.5)";
-  connectionPill.style.color = health.los
-    ? "#f97316"
-    : linkDegraded
-      ? "#f59e0b"
-      : "#4ade80";
+  const systemNetwork = autopilot?.system;
+  const activeInterface = systemNetwork?.network_active_interface || "";
+  const interfaceEntries = systemNetwork?.network_interfaces || {};
+  const wwanEntry = interfaceEntries?.wwan0;
+  const lteActiveConnected = activeInterface === "wwan0" && wwanEntry?.internet_connected;
+  const showLte = lteActiveConnected && !health.los && !linkDegraded;
+  connectionPill.classList.toggle("shell__status--lte", showLte);
+  if (showLte) {
+    connectionPill.textContent = "LINK: LTE";
+    connectionPill.style.borderColor = "";
+    connectionPill.style.color = "";
+  } else {
+    connectionPill.textContent = health.los
+      ? "LINK: LOS"
+      : linkDegraded
+        ? "LINK: DEGRADED"
+        : "LINK: OK";
+    connectionPill.style.borderColor = health.los
+      ? "rgba(249,115,22,0.6)"
+      : linkDegraded
+        ? "rgba(245,158,11,0.6)"
+        : "rgba(74,222,128,0.5)";
+    connectionPill.style.color = health.los
+      ? "#f97316"
+      : linkDegraded
+        ? "#f59e0b"
+        : "#4ade80";
+  }
 
   updateArmingStatus(autopilot?.mavlink);
 
