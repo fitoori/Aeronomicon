@@ -107,6 +107,13 @@ REMOTE_LTE_SIGNAL_SCRIPT = os.environ.get(
     "$HOME/Aeronomicon/util/lte-signal-strength.sh",
 ).strip()
 LTE_SIGNAL_TIMEOUT_S = float(os.environ.get("LTE_SIGNAL_TIMEOUT_S", "5.0"))
+NETWORK_INTERFACES = ("eth0", "wlan0", "wwan0")
+DRY_RUN = os.environ.get("WATNE_DRY_RUN", os.environ.get("DRY_RUN", "")).strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 # MAVLink status & command routing
 MAVLINK_ENDPOINT = os.environ.get("WATNE_MAVLINK_ENDPOINT", "udp:127.0.0.1:14550").strip()
@@ -372,6 +379,15 @@ class OnicsController:
         self._system_backoff_s = 0.0
         self._mavlink_backoff_until = 0.0
         self._mavlink_backoff_s = 0.0
+        self._wwan_meter = {
+            "last_rx": None,
+            "last_tx": None,
+            "last_mono": None,
+            "rx": 0,
+            "tx": 0,
+            "total": 0,
+            "rate_bps": 0.0,
+        }
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -445,7 +461,7 @@ class OnicsController:
 
         return hostname, username, port, identity_files, proxycommand
 
-    def _handle_ssh_failure(self, err: str) -> None:
+    def _handle_ssh_failure(self, err: str, *, publish: bool = True) -> None:
         if self._needs_login_prompt(err):
             hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
             msg = (
@@ -460,10 +476,20 @@ class OnicsController:
                     f"then run `ssh-copy-id -p {port} {username}@{hostname}` and "
                     f"`ssh -p {port} {username}@{hostname}` to continue."
                 )
-            self._set_login_prompt(True, msg)
+            if publish:
+                self._set_login_prompt(True, msg)
+            else:
+                with self._lock:
+                    self._runtime.login_required = True
+                    self._runtime.login_message = msg
             self._append_log("SSH AUTH REQUIRED: interactive login needed to continue.")
         else:
-            self._set_login_prompt(False, "")
+            if publish:
+                self._set_login_prompt(False, "")
+            else:
+                with self._lock:
+                    self._runtime.login_required = False
+                    self._runtime.login_message = ""
 
     def snapshot(self, *, include_logs: bool = True) -> Dict[str, Any]:
         hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
@@ -517,7 +543,21 @@ class OnicsController:
             self._fail_events_60s.popleft()
 
     @staticmethod
-    def _blank_system_stats() -> Dict[str, Any]:
+    def _blank_network_interfaces() -> Dict[str, Dict[str, Any]]:
+        return {
+            iface: {
+                "present": False,
+                "state": "missing",
+                "carrier": None,
+                "ipv4": "",
+                "ipv6": "",
+                "internet_connected": False,
+            }
+            for iface in NETWORK_INTERFACES
+        }
+
+    @classmethod
+    def _blank_system_stats(cls) -> Dict[str, Any]:
         return {
             "load_1": None,
             "load_5": None,
@@ -529,6 +569,14 @@ class OnicsController:
             "disk_total_bytes": None,
             "disk_used_bytes": None,
             "disk_free_bytes": None,
+            "network_active_interface": "",
+            "network_interfaces": cls._blank_network_interfaces(),
+            "wwan_rx_bytes": None,
+            "wwan_tx_bytes": None,
+            "wwan_metered_rx_bytes": 0,
+            "wwan_metered_tx_bytes": 0,
+            "wwan_metered_total_bytes": 0,
+            "wwan_metered_rate_bps": 0.0,
         }
 
     @classmethod
@@ -607,6 +655,53 @@ class OnicsController:
             except ValueError:
                 pass
 
+        if len(parts) >= 5:
+            active_iface = ""
+            interfaces = cls._blank_network_interfaces()
+            for line in parts[4].splitlines():
+                if not line.strip():
+                    continue
+                if line.startswith("active="):
+                    active_iface = line.partition("=")[2].strip()
+                    continue
+                fields = line.split("|")
+                if len(fields) < 5:
+                    continue
+                name, state, carrier, ipv4, ipv6 = fields[:5]
+                if name not in interfaces:
+                    continue
+                entry = interfaces[name]
+                entry["present"] = state != "missing"
+                entry["state"] = state or "unknown"
+                if carrier.strip() == "":
+                    entry["carrier"] = None
+                else:
+                    entry["carrier"] = carrier.strip() == "1"
+                entry["ipv4"] = ipv4.strip()
+                entry["ipv6"] = ipv6.strip()
+                link_up = entry["state"] == "up"
+                has_ip = bool(entry["ipv4"] or entry["ipv6"])
+                carrier_ok = entry["carrier"] is None or entry["carrier"]
+                entry["internet_connected"] = link_up and has_ip and carrier_ok
+            stats["network_active_interface"] = active_iface
+            stats["network_interfaces"] = interfaces
+
+        if len(parts) >= 6:
+            for line in parts[5].splitlines():
+                if not line.strip():
+                    continue
+                key, _, value = line.partition("=")
+                if key == "wwan_rx":
+                    try:
+                        stats["wwan_rx_bytes"] = int(value.strip())
+                    except ValueError:
+                        pass
+                elif key == "wwan_tx":
+                    try:
+                        stats["wwan_tx_bytes"] = int(value.strip())
+                    except ValueError:
+                        pass
+
         return stats
 
     def _fetch_remote_system_stats(self, client: paramiko.SSHClient) -> Dict[str, Any]:
@@ -621,7 +716,31 @@ class OnicsController:
             "echo $df_line | awk \"{print \\$2, \\$3, \\$4}\"; "
             "else df -k / 2>/dev/null | tail -n 1 | awk \"{print \\$2 * 1024, \\$3 * 1024, \\$4 * 1024}\"; fi; "
             "echo \"---\"; "
-            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0'"
+            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0; "
+            "echo \"---\"; "
+            "active_iface=$(ip route get 1.1.1.1 2>/dev/null | awk \"{for (i=1;i<=NF;i++) if (\\$i==\\\"dev\\\") {print \\$(i+1); exit}}\" ); "
+            "if [ -z \"$active_iface\" ]; then "
+            "active_iface=$(ip route show default 2>/dev/null | "
+            "awk \"NR==1{for (i=1;i<=NF;i++) if (\\$i==\\\"dev\\\") {print \\$(i+1); exit}}\" ); "
+            "fi; "
+            "echo \"active=$active_iface\"; "
+            "for iface in eth0 wlan0 wwan0; do "
+            "if [ -d /sys/class/net/$iface ]; then "
+            "state=$(cat /sys/class/net/$iface/operstate 2>/dev/null); "
+            "carrier=$(cat /sys/class/net/$iface/carrier 2>/dev/null); "
+            "ipv4=$(ip -o -4 addr show dev $iface 2>/dev/null | awk \"{print \\$4}\" | head -n 1); "
+            "ipv6=$(ip -o -6 addr show dev $iface scope global 2>/dev/null | "
+            "awk \"{print \\$4}\" | head -n 1); "
+            "echo \"$iface|$state|$carrier|$ipv4|$ipv6\"; "
+            "else echo \"$iface|missing|||\"; fi; "
+            "done; "
+            "echo \"---\"; "
+            "if [ -d /sys/class/net/wwan0 ]; then "
+            "wwan_rx=$(cat /sys/class/net/wwan0/statistics/rx_bytes 2>/dev/null); "
+            "wwan_tx=$(cat /sys/class/net/wwan0/statistics/tx_bytes 2>/dev/null); "
+            "echo \"wwan_rx=${wwan_rx:-0}\"; "
+            "echo \"wwan_tx=${wwan_tx:-0}\"; "
+            "else echo \"wwan_rx=\"; echo \"wwan_tx=\"; fi'"
         )
         _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
         output = stdout.read().decode("utf-8", errors="replace")
@@ -645,7 +764,7 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err)
+                self._handle_ssh_failure(err, publish=False)
                 if self._system_backoff_s <= 0.0:
                     self._system_backoff_s = max(3.0, SYSTEM_STATS_CHECK_S)
                 else:
@@ -666,10 +785,51 @@ class OnicsController:
                 except Exception:
                     pass
 
+        stats = self._apply_wwan_meter(stats)
+
         with self._lock:
             self._autopilot.system = stats
         self._system_backoff_s = 0.0
         self._system_backoff_until = 0.0
+
+    def _apply_wwan_meter(self, stats: Dict[str, Any]) -> Dict[str, Any]:
+        active_iface = stats.get("network_active_interface")
+        rx_bytes = stats.get("wwan_rx_bytes")
+        tx_bytes = stats.get("wwan_tx_bytes")
+        now_m = monotonic_s()
+
+        last_rx = self._wwan_meter.get("last_rx")
+        last_tx = self._wwan_meter.get("last_tx")
+        last_mono = self._wwan_meter.get("last_mono")
+
+        if active_iface == "wwan0" and isinstance(rx_bytes, int) and isinstance(tx_bytes, int):
+            if isinstance(last_rx, int) and isinstance(last_tx, int) and last_mono is not None:
+                delta_rx = max(0, rx_bytes - last_rx)
+                delta_tx = max(0, tx_bytes - last_tx)
+                delta_total = delta_rx + delta_tx
+                self._wwan_meter["rx"] += delta_rx
+                self._wwan_meter["tx"] += delta_tx
+                self._wwan_meter["total"] += delta_total
+                elapsed = max(now_m - float(last_mono), 0.0)
+                self._wwan_meter["rate_bps"] = (
+                    (delta_total / elapsed) if elapsed > 0 else 0.0
+                )
+            self._wwan_meter["last_mono"] = now_m
+        else:
+            self._wwan_meter["rate_bps"] = 0.0
+
+        if isinstance(rx_bytes, int):
+            self._wwan_meter["last_rx"] = rx_bytes
+        if isinstance(tx_bytes, int):
+            self._wwan_meter["last_tx"] = tx_bytes
+
+        stats["wwan_metered_rx_bytes"] = self._wwan_meter["rx"]
+        stats["wwan_metered_tx_bytes"] = self._wwan_meter["tx"]
+        stats["wwan_metered_total_bytes"] = self._wwan_meter["total"]
+        stats["wwan_metered_rate_bps"] = self._wwan_meter["rate_bps"]
+        stats["wwan_rx_bytes"] = rx_bytes
+        stats["wwan_tx_bytes"] = tx_bytes
+        return stats
 
     @staticmethod
     def _blank_mavlink_status(detail: str = "Awaiting MAVLink.") -> Dict[str, Any]:
@@ -814,7 +974,7 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err)
+                self._handle_ssh_failure(err, publish=False)
                 stats["lte_signal_error"] = f"SSH error: {err}"
                 self._lte_signal_cache = stats
                 return dict(stats)
@@ -1170,6 +1330,8 @@ class OnicsController:
     # --- SSH operations
 
     def _ssh_connect(self) -> Tuple[Optional[paramiko.SSHClient], str, int]:
+        if DRY_RUN:
+            return None, "Dry run mode enabled; skipping SSH connection.", 0
         hostname, username, port, identity_files, proxycommand = self._resolve_ssh_settings()
         start = time.time()
 
