@@ -806,7 +806,6 @@ class OnicsController:
 
         has_sample = isinstance(rx_bytes, int) and isinstance(tx_bytes, int)
         if has_sample and active_iface == "wwan0":
-        if active_iface == "wwan0" and isinstance(rx_bytes, int) and isinstance(tx_bytes, int):
             if isinstance(last_rx, int) and isinstance(last_tx, int) and last_mono is not None:
                 delta_rx = max(0, rx_bytes - last_rx)
                 delta_tx = max(0, tx_bytes - last_tx)
@@ -825,10 +824,6 @@ class OnicsController:
 
         if has_sample:
             self._wwan_meter["last_mono"] = now_m
-
-            self._wwan_meter["last_mono"] = now_m
-        else:
-            self._wwan_meter["rate_bps"] = 0.0
 
         if isinstance(rx_bytes, int):
             self._wwan_meter["last_rx"] = rx_bytes
