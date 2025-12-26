@@ -207,10 +207,12 @@
                 <div class="health-card__header">
                   <h3>Arducopter</h3>
                   <div class="health-card__header-actions">
-                    <button class="btn btn--service btn--service-stop" data-service-stop="arducopter">
-                      Stop
-                    </button>
-                    <button class="btn btn--service" data-service-restart="arducopter">Restart</button>
+                    <div class="health-card__action-stack">
+                      <button class="btn btn--service btn--service-stop" data-service-stop="arducopter">
+                        Stop
+                      </button>
+                      <button class="btn btn--service" data-service-restart="arducopter">Restart</button>
+                    </div>
                   </div>
                 </div>
                 <p class="health-card__value" id="arducopter-status">UNKNOWN</p>
@@ -220,10 +222,12 @@
                 <div class="health-card__header">
                   <h3>MAVProxy</h3>
                   <div class="health-card__header-actions">
-                    <button class="btn btn--service btn--service-stop" data-service-stop="mavproxy">
-                      Stop
-                    </button>
-                    <button class="btn btn--service" data-service-restart="mavproxy">Restart</button>
+                    <div class="health-card__action-stack">
+                      <button class="btn btn--service btn--service-stop" data-service-stop="mavproxy">
+                        Stop
+                      </button>
+                      <button class="btn btn--service" data-service-restart="mavproxy">Restart</button>
+                    </div>
                   </div>
                 </div>
                 <p class="health-card__value" id="mavproxy-status">UNKNOWN</p>
@@ -234,10 +238,12 @@
                   <h3>Uplink</h3>
                   <div class="health-card__header-actions">
                     <p class="health-card__signal-value" id="uplink-signal-value">n/a</p>
-                    <button class="btn btn--service btn--service-stop" data-service-stop="uplink">
-                      Stop
-                    </button>
-                    <button class="btn btn--service" data-service-restart="uplink">Restart</button>
+                    <div class="health-card__action-stack">
+                      <button class="btn btn--service btn--service-stop" data-service-stop="uplink">
+                        Stop
+                      </button>
+                      <button class="btn btn--service" data-service-restart="uplink">Restart</button>
+                    </div>
                   </div>
                 </div>
                 <p class="health-card__value" id="uplink-status">UNKNOWN</p>
