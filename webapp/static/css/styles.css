@@ -241,6 +241,24 @@ body.is-dry-run.is-offline .shell {
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 
+.shell__status--lte {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.7);
+  color: #bfdbfe;
+  box-shadow: 0 0 0 rgba(59, 130, 246, 0.6);
+  animation: shell-lte-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes shell-lte-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(59, 130, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(59, 130, 246, 0.75);
+  }
+}
+
 .shell__status-group {
   display: flex;
   flex-direction: column;
