@@ -535,6 +535,10 @@ body.is-offline .shell {
   color: rgba(148, 163, 184, 0.9);
 }
 
+.compact-hide {
+  display: block;
+}
+
 
 .age--yellow {
   color: #facc15;
@@ -819,6 +823,14 @@ body.is-rebooting .shell {
 }
 
 @media (max-width: 560px) {
+  .shell__header {
+    gap: 12px;
+  }
+
+  .shell__status {
+    align-self: flex-start;
+  }
+
   .panel__header--actions {
     align-items: stretch;
   }
@@ -829,5 +841,56 @@ body.is-rebooting .shell {
 
   .toolbar__items {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .shell {
+    padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+      calc(28px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+  }
+
+  .shell__brand {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .shell__stats {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .shell__stat-card.load-card {
+    display: none;
+  }
+
+  #engage-toggle-btn {
+    padding: 1rem 1.4rem;
+    font-size: 1rem;
+  }
+
+  .panel__header {
+    padding: 12px 14px 6px;
+  }
+
+  .panel__body {
+    padding: 8px 14px 12px;
+  }
+
+  .toolbar {
+    padding: 10px 12px;
+  }
+
+  .health-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .log-view {
+    height: clamp(180px, 28vh, 260px);
+  }
+
+  .compact-hide {
+    display: none;
   }
 }
