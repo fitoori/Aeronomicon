@@ -109,7 +109,13 @@
             </div>
           </div>
         </div>
-        <div class="shell__status" id="connection-pill">LINK: INIT</div>
+        <div class="shell__status-group">
+          <div class="shell__status" id="connection-pill">LINK: INIT</div>
+          <div class="shell__substatus shell__substatus--unknown" id="arming-status">ARMING: UNKNOWN</div>
+          <div class="shell__substatus shell__substatus--meta" id="arming-meta">
+            Awaiting MAVLink.
+          </div>
+        </div>
       </header>
 
       <section class="pin-area">
@@ -119,7 +125,9 @@
             <div class="health-card" id="tracking-card">
               <h3>Tracking Confidence</h3>
               <p class="health-card__value" id="tracking-confidence">Awaiting telemetry</p>
-              <p class="health-card__meta" id="tracking-meta">No tracking updates yet.</p>
+              <p class="health-card__meta compact-hide" id="tracking-meta">
+                No tracking updates yet.
+              </p>
             </div>
             <div class="health-card" id="startup-card">
               <div class="health-card__header">
@@ -127,12 +135,16 @@
                 <p class="startup-fails__value" id="startup-fails">0</p>
               </div>
               <p class="health-card__value" id="startup-stage">Awaiting telemetry</p>
-              <p class="health-card__meta" id="startup-meta">No startup milestones yet.</p>
+              <p class="health-card__meta compact-hide" id="startup-meta">
+                No startup milestones yet.
+              </p>
             </div>
             <div class="health-card" id="autopilot-card">
               <h3>Autopilot Alerts</h3>
               <p class="health-card__value" id="autopilot-alert">Awaiting telemetry</p>
-              <p class="health-card__meta" id="autopilot-meta">No autopilot alerts yet.</p>
+              <p class="health-card__meta compact-hide" id="autopilot-meta">
+                No autopilot alerts yet.
+              </p>
             </div>
           </div>
         </article>
@@ -162,20 +174,25 @@
                 <p class="health-card__badge" id="tailscale-backend">Backend: UNKNOWN</p>
               </div>
               <p class="health-card__value" id="tailscale-status">UNKNOWN</p>
-              <p class="health-card__meta" id="tailscale-meta">Awaiting tailscale status.</p>
-              <p class="health-card__meta health-card__meta--muted" id="tailscale-error">
+              <p class="health-card__meta compact-hide" id="tailscale-meta">
+                Awaiting tailscale status.
+              </p>
+              <p
+                class="health-card__meta health-card__meta--muted compact-hide"
+                id="tailscale-error"
+              >
                 No errors reported.
               </p>
             </div>
             <div class="health-card" id="dns-card">
               <h3>MagicDNS</h3>
               <p class="health-card__value" id="dns-status">UNKNOWN</p>
-              <p class="health-card__meta" id="dns-meta">Awaiting DNS.</p>
+              <p class="health-card__meta compact-hide" id="dns-meta">Awaiting DNS.</p>
             </div>
             <div class="health-card" id="tcp-card">
               <h3>SSH Probe</h3>
               <p class="health-card__value" id="tcp-status">UNKNOWN</p>
-              <p class="health-card__meta" id="tcp-meta">Awaiting TCP.</p>
+              <p class="health-card__meta compact-hide" id="tcp-meta">Awaiting TCP.</p>
             </div>
           </div>
         </article>
@@ -231,6 +248,33 @@
           </div>
         </article>
 
+        <article class="panel" id="mavlink-panel">
+          <header class="panel__header">
+            <h2>MAVLink Console</h2>
+          </header>
+          <div class="panel__body">
+            <form class="mavlink-form" id="mavlink-form">
+              <label class="mavlink-form__label" for="mavlink-command">Command</label>
+              <div class="mavlink-form__row">
+                <input
+                  class="mavlink-form__input"
+                  id="mavlink-command"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="status"
+                />
+                <button class="btn btn--service" id="mavlink-send-btn" type="submit">
+                  Send
+                </button>
+              </div>
+              <p class="mavlink-form__hint">Examples: status · arm throttle · disarm</p>
+            </form>
+            <div class="mavlink-output" id="mavlink-output" aria-live="polite">
+              Awaiting command.
+            </div>
+          </div>
+        </article>
+
         <article class="panel" id="system-section">
           <header class="panel__header">
             <h2>System Resources</h2>
@@ -247,7 +291,9 @@
                   ></canvas>
                 </div>
                 <p class="health-card__value" id="system-load">-</p>
-                <p class="health-card__meta" id="system-load-meta">CPU core count unavailable.</p>
+                <p class="health-card__meta compact-hide" id="system-load-meta">
+                  CPU core count unavailable.
+                </p>
               </div>
               <div class="health-card load-card" id="system-memory-card">
                 <h3>Memory</h3>
@@ -259,12 +305,21 @@
                   ></canvas>
                 </div>
                 <p class="health-card__value" id="system-memory">-</p>
-                <p class="health-card__meta" id="system-memory-meta">Memory telemetry unavailable.</p>
+                <p class="health-card__meta compact-hide" id="system-memory-meta">
+                  Memory telemetry unavailable.
+                </p>
               </div>
               <div class="health-card" id="system-disk-card">
                 <h3>Disk</h3>
                 <p class="health-card__value" id="system-disk">-</p>
-                <p class="health-card__meta" id="system-disk-meta">Disk telemetry unavailable.</p>
+              <p class="health-card__meta compact-hide" id="system-disk-meta">
+                Disk telemetry unavailable.
+              </p>
+              </div>
+              <div class="health-card" id="system-network-card">
+                <h3>Network</h3>
+                <p class="health-card__value" id="system-network">-</p>
+                <p class="health-card__meta" id="system-network-meta">Network telemetry unavailable.</p>
               </div>
               <div class="health-card" id="system-network-card">
                 <h3>Network</h3>

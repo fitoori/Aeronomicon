@@ -44,6 +44,10 @@ body.is-offline .shell {
   filter: blur(6px);
 }
 
+body.is-dry-run.is-offline .shell {
+  filter: none;
+}
+
 .shell__header {
   display: flex;
   flex-wrap: wrap;
@@ -243,6 +247,57 @@ body.is-offline .shell {
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 
+.shell__status--lte {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.7);
+  color: #bfdbfe;
+  box-shadow: 0 0 0 rgba(59, 130, 246, 0.6);
+  animation: shell-lte-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes shell-lte-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(59, 130, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(59, 130, 246, 0.75);
+  }
+}
+
+.shell__status-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.shell__substatus {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.shell__substatus--meta {
+  text-transform: none;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.shell__substatus--armed {
+  color: #f87171;
+}
+
+.shell__substatus--disarmed {
+  color: #4ade80;
+}
+
+.shell__substatus--unknown {
+  color: #94a3b8;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -263,6 +318,59 @@ body.is-offline .shell {
   display: flex;
   flex-direction: column;
   min-height: 200px;
+}
+
+.mavlink-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mavlink-form__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.mavlink-form__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mavlink-form__input {
+  flex: 1;
+  min-width: 200px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 12, 10, 0.7);
+  color: #f8fafc;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.95rem;
+}
+
+.mavlink-form__input::placeholder {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.mavlink-form__hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.mavlink-output {
+  margin-top: 14px;
+  padding: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 12, 10, 0.65);
+  color: #e2e8f0;
+  font-family: "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  min-height: 80px;
 }
 
 .panel--full {
@@ -541,6 +649,10 @@ body.is-offline .shell {
   color: rgba(148, 163, 184, 0.9);
 }
 
+.compact-hide {
+  display: block;
+}
+
 
 .age--yellow {
   color: #facc15;
@@ -649,6 +761,11 @@ body.is-offline .offline-screen {
   background: radial-gradient(circle, rgba(10, 18, 14, 0.96), rgba(3, 6, 5, 0.98));
   z-index: 998;
   transition: opacity 0.4s ease;
+}
+
+body.is-dry-run.is-offline .offline-screen {
+  opacity: 0;
+  pointer-events: none;
 }
 
 body.is-rebooting .shell {
@@ -825,6 +942,14 @@ body.is-rebooting .shell {
 }
 
 @media (max-width: 560px) {
+  .shell__header {
+    gap: 12px;
+  }
+
+  .shell__status {
+    align-self: flex-start;
+  }
+
   .panel__header--actions {
     align-items: stretch;
   }
@@ -835,5 +960,56 @@ body.is-rebooting .shell {
 
   .toolbar__items {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .shell {
+    padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+      calc(28px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
+  }
+
+  .shell__brand {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .shell__stats {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .shell__stat-card.load-card {
+    display: none;
+  }
+
+  #engage-toggle-btn {
+    padding: 1rem 1.4rem;
+    font-size: 1rem;
+  }
+
+  .panel__header {
+    padding: 12px 14px 6px;
+  }
+
+  .panel__body {
+    padding: 8px 14px 12px;
+  }
+
+  .toolbar {
+    padding: 10px 12px;
+  }
+
+  .health-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .log-view {
+    height: clamp(180px, 28vh, 260px);
+  }
+
+  .compact-hide {
+    display: none;
   }
 }

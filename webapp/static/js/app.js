@@ -5,6 +5,8 @@ const loadingScreen = document.getElementById("loading-screen");
 const offlineScreen = document.getElementById("offline-screen");
 const rebootScreen = document.getElementById("reboot-screen");
 const connectionPill = document.getElementById("connection-pill");
+const armingStatus = document.getElementById("arming-status");
+const armingMeta = document.getElementById("arming-meta");
 const logoMenuButton = document.getElementById("logo-menu-button");
 const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
@@ -19,6 +21,24 @@ const loginOpenBtn = document.getElementById("login-open-btn");
 const loginDismissBtn = document.getElementById("login-dismiss-btn");
 const serviceRestartButtons = document.querySelectorAll("[data-service-restart]");
 const serviceStopButtons = document.querySelectorAll("[data-service-stop]");
+
+let dryRunMode = false;
+let isOffline = false;
+let hasSnapshot = false;
+
+function setLoadingScreenVisible(visible) {
+  if (!loadingScreen) {
+    return;
+  }
+  loadingScreen.classList.toggle("hidden", !visible);
+  loadingScreen.setAttribute("aria-hidden", visible ? "false" : "true");
+}
+
+function setDryRunMode(enabled) {
+  dryRunMode = Boolean(enabled);
+  document.body.classList.toggle("is-dry-run", dryRunMode);
+  setOfflineState(isOffline);
+}
 
 const tailscaleStatus = document.getElementById("tailscale-status");
 const tailscaleBackend = document.getElementById("tailscale-backend");
@@ -59,6 +79,10 @@ const headerLoadGraph = document.getElementById("header-load-graph");
 const headerData = document.getElementById("header-data");
 const headerDataCard = document.getElementById("header-data-card");
 const headerDisk = document.getElementById("header-disk");
+const mavlinkForm = document.getElementById("mavlink-form");
+const mavlinkCommandInput = document.getElementById("mavlink-command");
+const mavlinkSendBtn = document.getElementById("mavlink-send-btn");
+const mavlinkOutput = document.getElementById("mavlink-output");
 
 let engageToggleAction = null;
 let rebootPending = false;
@@ -98,10 +122,22 @@ const cards = {
   systemNetwork: document.getElementById("system-network-card"),
 };
 
-function setOfflineState(isOffline) {
+function setOfflineState(nextOffline) {
+  isOffline = Boolean(nextOffline);
   document.body.classList.toggle("is-offline", isOffline);
-  if (offlineScreen) {
-    offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
+  if (dryRunMode) {
+    if (offlineScreen) {
+      offlineScreen.setAttribute("aria-hidden", "true");
+    }
+    if (isOffline) {
+      setLoadingScreenVisible(true);
+    } else if (hasSnapshot) {
+      setLoadingScreenVisible(false);
+    }
+  } else {
+    if (offlineScreen) {
+      offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
+    }
   }
 }
 
@@ -703,6 +739,40 @@ function setLoginPrompt(meta, onics) {
   }
 }
 
+function updateArmingStatus(mavlink) {
+  if (!armingStatus || !armingMeta) {
+    return;
+  }
+  const armed = mavlink?.arming;
+  let text = "ARMING: UNKNOWN";
+  let className = "shell__substatus--unknown";
+  if (armed === true) {
+    text = "ARMING: ARMED";
+    className = "shell__substatus--armed";
+  } else if (armed === false) {
+    text = "ARMING: DISARMED";
+    className = "shell__substatus--disarmed";
+  }
+  armingStatus.textContent = text;
+  armingStatus.classList.remove(
+    "shell__substatus--unknown",
+    "shell__substatus--armed",
+    "shell__substatus--disarmed"
+  );
+  armingStatus.classList.add(className);
+
+  const heartbeatAge = mavlink?.last_heartbeat_iso
+    ? ageSecondsFromTimestamp(mavlink.last_heartbeat_iso)
+    : null;
+  if (heartbeatAge !== null) {
+    armingMeta.textContent = `Last heartbeat ${formatAge(heartbeatAge)}`;
+    setAgeSeverity(armingMeta, heartbeatAge);
+  } else {
+    armingMeta.textContent = mavlink?.detail || "Awaiting MAVLink.";
+    setAgeSeverity(armingMeta, null);
+  }
+}
+
 function updateSnapshot(snapshot, options = {}) {
   if (!snapshot) {
     return;
@@ -711,9 +781,9 @@ function updateSnapshot(snapshot, options = {}) {
     setOfflineState(false);
   }
 
+  hasSnapshot = true;
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
-    loadingScreen.classList.add("hidden");
-    setTimeout(() => loadingScreen.remove(), 600);
+    setLoadingScreenVisible(false);
   }
 
   const { meta, health, onics, autopilot } = snapshot;
@@ -744,21 +814,36 @@ function updateSnapshot(snapshot, options = {}) {
     }
   }
   setRebootOverlay(rebootPending);
-  connectionPill.textContent = health.los
-    ? "LINK: LOS"
-    : linkDegraded
-      ? "LINK: DEGRADED"
-      : "LINK: OK";
-  connectionPill.style.borderColor = health.los
-    ? "rgba(249,115,22,0.6)"
-    : linkDegraded
-      ? "rgba(245,158,11,0.6)"
-      : "rgba(74,222,128,0.5)";
-  connectionPill.style.color = health.los
-    ? "#f97316"
-    : linkDegraded
-      ? "#f59e0b"
-      : "#4ade80";
+  const systemNetwork = autopilot?.system;
+  const activeInterface = systemNetwork?.network_active_interface || "";
+  const interfaceEntries = systemNetwork?.network_interfaces || {};
+  const wwanEntry = interfaceEntries?.wwan0;
+  const lteActiveConnected = activeInterface === "wwan0" && wwanEntry?.internet_connected;
+  const showLte = lteActiveConnected && !health.los && !linkDegraded;
+  connectionPill.classList.toggle("shell__status--lte", showLte);
+  if (showLte) {
+    connectionPill.textContent = "LINK: LTE";
+    connectionPill.style.borderColor = "";
+    connectionPill.style.color = "";
+  } else {
+    connectionPill.textContent = health.los
+      ? "LINK: LOS"
+      : linkDegraded
+        ? "LINK: DEGRADED"
+        : "LINK: OK";
+    connectionPill.style.borderColor = health.los
+      ? "rgba(249,115,22,0.6)"
+      : linkDegraded
+        ? "rgba(245,158,11,0.6)"
+        : "rgba(74,222,128,0.5)";
+    connectionPill.style.color = health.los
+      ? "#f97316"
+      : linkDegraded
+        ? "#f59e0b"
+        : "#4ade80";
+  }
+
+  updateArmingStatus(autopilot?.mavlink);
 
   if (onicsState) {
     onicsState.textContent = onics.state;
@@ -934,6 +1019,7 @@ function updateSnapshot(snapshot, options = {}) {
     }
 
     if (systemNetwork) {
+      const activeInterface = system.network_active_interface || "";
       const entries = system.network_interfaces || {};
       let anyConnected = false;
       let activeConnected = false;
@@ -977,6 +1063,9 @@ function updateSnapshot(snapshot, options = {}) {
   updateEngageToggle(onics);
 
   const restartReady = health.tailscale_ok && health.dns_ok && health.tcp_ok && !rebootPending;
+  if (mavlinkSendBtn) {
+    mavlinkSendBtn.disabled = !restartReady;
+  }
   serviceRestartButtons.forEach((button) => {
     button.disabled = !restartReady;
   });
@@ -1015,6 +1104,19 @@ async function sendCommand(path) {
   return res.json();
 }
 
+async function sendJsonCommand(path, payload) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.msg || "Command failed");
+  }
+  return res.json();
+}
+
 engageToggleBtn?.addEventListener("click", async () => {
   if (!engageToggleAction) {
     return;
@@ -1039,6 +1141,35 @@ clearBtn?.addEventListener("click", async () => {
     appendLog(`CLEAR FAILED: ${err.message}`);
   } finally {
     clearBtn.disabled = false;
+  }
+});
+
+mavlinkForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!mavlinkCommandInput || !mavlinkOutput) {
+    return;
+  }
+  const command = mavlinkCommandInput.value.trim();
+  if (!command) {
+    mavlinkOutput.textContent = "Enter a MAVLink command to send.";
+    return;
+  }
+  if (mavlinkSendBtn) {
+    mavlinkSendBtn.disabled = true;
+  }
+  mavlinkOutput.textContent = `Sending: ${command}`;
+  try {
+    const data = await sendJsonCommand("/api/mavlink", { command });
+    updateSnapshot(data.snapshot);
+    mavlinkOutput.textContent = data.output || data.msg || "Command sent.";
+    appendLog(`MAVLINK COMMAND SENT: ${command}`);
+  } catch (err) {
+    mavlinkOutput.textContent = `Command failed: ${err.message}`;
+    appendLog(`MAVLINK COMMAND FAILED: ${err.message}`);
+  } finally {
+    if (mavlinkSendBtn) {
+      mavlinkSendBtn.disabled = false;
+    }
   }
 });
 
@@ -1191,3 +1322,10 @@ fetch("/api/snapshot")
   .catch(() => {
     appendLog("WARNING: Unable to fetch initial snapshot.");
   });
+
+window.onicsSetDryRunMode = setDryRunMode;
+
+const queryDryRun = new URLSearchParams(window.location.search).get("dry_run");
+if (queryDryRun && queryDryRun !== "0" && queryDryRun.toLowerCase() !== "false") {
+  setDryRunMode(true);
+}
