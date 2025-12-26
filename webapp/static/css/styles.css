@@ -286,16 +286,22 @@ body.is-dry-run.is-offline .shell {
   color: rgba(226, 232, 240, 0.75);
 }
 
-.shell__substatus--armed {
-  color: #f87171;
+.shell__status--armed {
+  background: rgba(248, 113, 113, 0.2);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fecaca;
 }
 
-.shell__substatus--disarmed {
-  color: #4ade80;
+.shell__status--disarmed {
+  background: rgba(34, 197, 94, 0.22);
+  border-color: rgba(74, 222, 128, 0.55);
+  color: #d1fae5;
 }
 
-.shell__substatus--unknown {
-  color: #94a3b8;
+.shell__status--unknown {
+  background: rgba(148, 163, 184, 0.2);
+  border-color: rgba(148, 163, 184, 0.4);
+  color: #e2e8f0;
 }
 
 .grid {
@@ -388,6 +394,62 @@ body.is-dry-run.is-offline .shell {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.panel__title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel__tabs {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px;
+  background: rgba(8, 12, 10, 0.55);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.panel__tab {
+  border: none;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: transparent;
+  color: rgba(226, 232, 240, 0.75);
+  cursor: pointer;
+}
+
+.panel__tab.is-active {
+  background: rgba(129, 255, 193, 0.12);
+  color: #f8fafc;
+  box-shadow: inset 0 0 0 1px rgba(129, 255, 193, 0.35);
+}
+
+.panel__body--tabs {
+  padding-top: 0;
+}
+
+.tab-panel {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 220px;
+}
+
+.tab-panel.is-active {
+  display: flex;
 }
 
 .panel__header h2 {
@@ -624,6 +686,13 @@ body.is-dry-run.is-offline .shell {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.health-card__action-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .health-card__signal-value {
