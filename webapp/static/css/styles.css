@@ -237,6 +237,39 @@ body.is-offline .shell {
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
 }
 
+.shell__status-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.shell__substatus {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.shell__substatus--meta {
+  text-transform: none;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.shell__substatus--armed {
+  color: #f87171;
+}
+
+.shell__substatus--disarmed {
+  color: #4ade80;
+}
+
+.shell__substatus--unknown {
+  color: #94a3b8;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -257,6 +290,59 @@ body.is-offline .shell {
   display: flex;
   flex-direction: column;
   min-height: 200px;
+}
+
+.mavlink-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mavlink-form__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.mavlink-form__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mavlink-form__input {
+  flex: 1;
+  min-width: 200px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 12, 10, 0.7);
+  color: #f8fafc;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.95rem;
+}
+
+.mavlink-form__input::placeholder {
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.mavlink-form__hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.mavlink-output {
+  margin-top: 14px;
+  padding: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 12, 10, 0.65);
+  color: #e2e8f0;
+  font-family: "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  min-height: 80px;
 }
 
 .panel--full {

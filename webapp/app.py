@@ -43,6 +43,7 @@ import sys
 import threading
 import time
 import traceback
+import textwrap
 from collections import deque
 from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple
 
@@ -51,7 +52,7 @@ from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple
 _missing: List[str] = []
 
 try:
-    from flask import Flask, Response, jsonify, render_template
+    from flask import Flask, Response, jsonify, render_template, request
     from werkzeug.serving import WSGIRequestHandler, make_server
 except Exception:  # pragma: no cover
     _missing.append("flask")
@@ -106,6 +107,14 @@ REMOTE_LTE_SIGNAL_SCRIPT = os.environ.get(
     "$HOME/Aeronomicon/util/lte-signal-strength.sh",
 ).strip()
 LTE_SIGNAL_TIMEOUT_S = float(os.environ.get("LTE_SIGNAL_TIMEOUT_S", "5.0"))
+
+# MAVLink status & command routing
+MAVLINK_ENDPOINT = os.environ.get("WATNE_MAVLINK_ENDPOINT", "udp:127.0.0.1:14550").strip()
+MAVLINK_STATUS_CHECK_S = float(os.environ.get("MAVLINK_STATUS_CHECK_S", "4.0"))
+MAVLINK_STATUS_TIMEOUT_S = float(os.environ.get("MAVLINK_STATUS_TIMEOUT_S", "3.0"))
+MAVLINK_COMMAND_TIMEOUT_S = float(os.environ.get("MAVLINK_COMMAND_TIMEOUT_S", "8.0"))
+MAVLINK_COMMAND_MAX_LEN = int(os.environ.get("MAVLINK_COMMAND_MAX_LEN", "120"))
+MAVPROXY_CMD = os.environ.get("WATNE_MAVPROXY_CMD", "mavproxy.py").strip()
 
 # "Staleness" thresholds (seconds)
 REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
@@ -299,6 +308,7 @@ class OnicsRuntime:
 class AutopilotHealth:
     services: Dict[str, Dict[str, Any]] = dataclasses.field(default_factory=dict)
     system: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    mavlink: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 # ---- ONICS-T controller ------------------------------------------------------
@@ -333,6 +343,12 @@ class OnicsController:
                 },
             },
             system={},
+            mavlink={
+                "status": "UNKNOWN",
+                "detail": "Awaiting MAVLink.",
+                "arming": None,
+                "last_heartbeat_iso": None,
+            },
         )
         self._stop_requested = False
         self._ssh: Optional[paramiko.SSHClient] = None
@@ -348,11 +364,14 @@ class OnicsController:
         self._last_service_check = 0.0
         self._last_lte_check = 0.0
         self._last_system_check = 0.0
+        self._last_mavlink_check = 0.0
         self._lte_signal_cache: Dict[str, Any] = {}
         self._service_backoff_until = 0.0
         self._service_backoff_s = 0.0
         self._system_backoff_until = 0.0
         self._system_backoff_s = 0.0
+        self._mavlink_backoff_until = 0.0
+        self._mavlink_backoff_s = 0.0
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -651,6 +670,111 @@ class OnicsController:
             self._autopilot.system = stats
         self._system_backoff_s = 0.0
         self._system_backoff_until = 0.0
+
+    @staticmethod
+    def _blank_mavlink_status(detail: str = "Awaiting MAVLink.") -> Dict[str, Any]:
+        return {
+            "status": "UNKNOWN",
+            "detail": detail,
+            "arming": None,
+            "last_heartbeat_iso": None,
+        }
+
+    @staticmethod
+    def _parse_mavlink_status_output(output: str) -> Dict[str, Any]:
+        cleaned = output.strip().splitlines()
+        if not cleaned:
+            return {"ok": False, "error": "Empty MAVLink response."}
+        payload = cleaned[-1]
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return {"ok": False, "error": f"Invalid MAVLink JSON: {payload.strip()}"}
+
+    def _fetch_remote_mavlink_status(self, client: paramiko.SSHClient) -> Dict[str, Any]:
+        script = textwrap.dedent(
+            f"""
+            python3 - <<'PY'
+            import json
+            from pymavlink import mavutil
+
+            endpoint = {MAVLINK_ENDPOINT!r}
+            timeout = {MAVLINK_STATUS_TIMEOUT_S!r}
+            result = {{"ok": False, "error": "No heartbeat"}}
+            try:
+                mav = mavutil.mavlink_connection(endpoint, input=False, autoreconnect=False, timeout=timeout)
+                hb = mav.recv_match(type="HEARTBEAT", blocking=True, timeout=timeout)
+                if hb is None:
+                    result = {{"ok": False, "error": "No heartbeat"}}
+                else:
+                    armed = bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+                    result = {{"ok": True, "arming": armed}}
+            except Exception as exc:
+                result = {{"ok": False, "error": f"{type(exc).__name__}: {exc}"}}
+            print(json.dumps(result))
+            PY
+            """
+        ).strip()
+        cmd = f"bash -lc {shlex.quote(script)}"
+        _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False, timeout=MAVLINK_STATUS_TIMEOUT_S)
+        output = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        _ = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+        payload = self._parse_mavlink_status_output(output)
+        if err and not payload.get("ok"):
+            payload["error"] = f"{payload.get('error', 'MAVLink error')} ({err.strip()})"
+        return payload
+
+    def _mavlink_status_check(self) -> None:
+        now_m = monotonic_s()
+        if now_m < self._mavlink_backoff_until:
+            return
+
+        client: Optional[paramiko.SSHClient]
+        created = False
+        with self._lock:
+            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
+
+        if client is None:
+            client, err, _ms = self._ssh_connect()
+            if client is None:
+                self._mark_failure()
+                self._handle_ssh_failure(err)
+                if self._mavlink_backoff_s <= 0.0:
+                    self._mavlink_backoff_s = max(3.0, MAVLINK_STATUS_CHECK_S)
+                else:
+                    self._mavlink_backoff_s = min(self._mavlink_backoff_s * 2.0, 60.0)
+                self._mavlink_backoff_until = monotonic_s() + self._mavlink_backoff_s
+                with self._lock:
+                    self._autopilot.mavlink = self._blank_mavlink_status(f"SSH error: {err}")
+                return
+            created = True
+
+        status = self._blank_mavlink_status()
+        try:
+            payload = self._fetch_remote_mavlink_status(client)
+            if payload.get("ok"):
+                status["status"] = "OK"
+                status["arming"] = payload.get("arming")
+                status["last_heartbeat_iso"] = wall_time_iso()
+                status["detail"] = "Heartbeat received."
+            else:
+                status["status"] = "ERROR"
+                status["detail"] = payload.get("error", "MAVLink error.")
+        except Exception as exc:
+            status["status"] = "ERROR"
+            status["detail"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            if created and client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+
+        with self._lock:
+            self._autopilot.mavlink = status
+        self._mavlink_backoff_s = 0.0
+        self._mavlink_backoff_until = 0.0
 
     @staticmethod
     def _parse_lte_signal_output(output: str) -> Tuple[Optional[float], Optional[float]]:
@@ -999,6 +1123,10 @@ class OnicsController:
             self._last_system_check = now_m
             self._system_stats_check()
 
+        if (now_m - self._last_mavlink_check) >= MAVLINK_STATUS_CHECK_S:
+            self._last_mavlink_check = now_m
+            self._mavlink_status_check()
+
         # Compute stale/LOS and stability score.
         with self._lock:
             hl = self._health
@@ -1270,6 +1398,72 @@ class OnicsController:
         self._append_log(f"SERVICE STOP {outcome}: {unit}{log_detail}")
         self._services_check()
         return ok, detail or ("Stopped" if ok else "Stop failed")
+
+    def send_mavlink_command(self, command: str) -> Tuple[bool, str, str]:
+        cleaned = command.strip()
+        if not cleaned:
+            return False, "Command is empty.", ""
+        if len(cleaned) > MAVLINK_COMMAND_MAX_LEN:
+            return False, f"Command exceeds {MAVLINK_COMMAND_MAX_LEN} characters.", ""
+        if "\n" in cleaned or "\r" in cleaned:
+            return False, "Command must be a single line.", ""
+
+        with self._lock:
+            if not (self._health.tailscale_ok and self._health.dns_ok and self._health.tcp_ok):
+                return False, "Tailnet/SSH health is not OK; refusing command", ""
+
+        client: Optional[paramiko.SSHClient]
+        created = False
+        with self._lock:
+            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
+
+        if client is None:
+            client, err, _ms = self._ssh_connect()
+            if client is None:
+                self._mark_failure()
+                self._handle_ssh_failure(err)
+                return False, f"SSH error: {err}", ""
+            created = True
+
+        ok = False
+        detail = ""
+        output = ""
+        try:
+            cmd_parts = shlex.split(MAVPROXY_CMD) if MAVPROXY_CMD else ["mavproxy.py"]
+            base_cmd = " ".join(shlex.quote(part) for part in cmd_parts)
+            cmd = (
+                f"{base_cmd} --master={shlex.quote(MAVLINK_ENDPOINT)} "
+                f"--cmd {shlex.quote(cleaned)} --cmd {shlex.quote('exit')}"
+            )
+            _stdin, stdout, stderr = client.exec_command(
+                cmd,
+                get_pty=False,
+                timeout=MAVLINK_COMMAND_TIMEOUT_S,
+            )
+            stdout_text = stdout.read().decode("utf-8", errors="replace")
+            stderr_text = stderr.read().decode("utf-8", errors="replace")
+            exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+            output = (stdout_text + ("\n" + stderr_text if stderr_text else "")).strip()
+            detail = output or ""
+            ok = exit_status == 0
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            ok = False
+        finally:
+            if created and client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+
+        if len(detail) > 1200:
+            detail = detail[:1200].rstrip() + "…"
+        output = detail
+        outcome = "OK" if ok else "FAILED"
+        self._append_log(f"MAVLINK CMD {outcome}: {cleaned}")
+        if detail:
+            self._append_log(f"MAVLINK OUTPUT: {detail}")
+        return ok, detail or ("Command sent" if ok else "Command failed"), output
 
     def reboot_vehicle(self) -> Tuple[bool, str]:
         with self._lock:
@@ -1665,6 +1859,17 @@ def api_service_stop(service_key: str) -> Response:
 def api_reboot() -> Response:
     ok, msg = controller.reboot_vehicle()
     return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
+
+
+@app.post("/api/mavlink")
+def api_mavlink() -> Response:
+    payload = request.get_json(silent=True) or {}
+    command = str(payload.get("command", "")).strip()
+    ok, msg, output = controller.send_mavlink_command(command)
+    return (
+        jsonify({"ok": ok, "msg": msg, "output": output, "snapshot": controller.snapshot()}),
+        (200 if ok else 409),
+    )
 
 
 @app.get("/stream")

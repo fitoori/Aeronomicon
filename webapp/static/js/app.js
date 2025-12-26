@@ -5,6 +5,8 @@ const loadingScreen = document.getElementById("loading-screen");
 const offlineScreen = document.getElementById("offline-screen");
 const rebootScreen = document.getElementById("reboot-screen");
 const connectionPill = document.getElementById("connection-pill");
+const armingStatus = document.getElementById("arming-status");
+const armingMeta = document.getElementById("arming-meta");
 const logoMenuButton = document.getElementById("logo-menu-button");
 const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
@@ -57,6 +59,10 @@ const headerLoadGraph = document.getElementById("header-load-graph");
 const headerMemory = document.getElementById("header-memory");
 const headerMemoryGraph = document.getElementById("header-memory-graph");
 const headerDisk = document.getElementById("header-disk");
+const mavlinkForm = document.getElementById("mavlink-form");
+const mavlinkCommandInput = document.getElementById("mavlink-command");
+const mavlinkSendBtn = document.getElementById("mavlink-send-btn");
+const mavlinkOutput = document.getElementById("mavlink-output");
 
 let engageToggleAction = null;
 let rebootPending = false;
@@ -680,6 +686,40 @@ function setLoginPrompt(meta, onics) {
   }
 }
 
+function updateArmingStatus(mavlink) {
+  if (!armingStatus || !armingMeta) {
+    return;
+  }
+  const armed = mavlink?.arming;
+  let text = "ARMING: UNKNOWN";
+  let className = "shell__substatus--unknown";
+  if (armed === true) {
+    text = "ARMING: ARMED";
+    className = "shell__substatus--armed";
+  } else if (armed === false) {
+    text = "ARMING: DISARMED";
+    className = "shell__substatus--disarmed";
+  }
+  armingStatus.textContent = text;
+  armingStatus.classList.remove(
+    "shell__substatus--unknown",
+    "shell__substatus--armed",
+    "shell__substatus--disarmed"
+  );
+  armingStatus.classList.add(className);
+
+  const heartbeatAge = mavlink?.last_heartbeat_iso
+    ? ageSecondsFromTimestamp(mavlink.last_heartbeat_iso)
+    : null;
+  if (heartbeatAge !== null) {
+    armingMeta.textContent = `Last heartbeat ${formatAge(heartbeatAge)}`;
+    setAgeSeverity(armingMeta, heartbeatAge);
+  } else {
+    armingMeta.textContent = mavlink?.detail || "Awaiting MAVLink.";
+    setAgeSeverity(armingMeta, null);
+  }
+}
+
 function updateSnapshot(snapshot, options = {}) {
   if (!snapshot) {
     return;
@@ -736,6 +776,8 @@ function updateSnapshot(snapshot, options = {}) {
     : linkDegraded
       ? "#f59e0b"
       : "#4ade80";
+
+  updateArmingStatus(autopilot?.mavlink);
 
   if (onicsState) {
     onicsState.textContent = onics.state;
@@ -914,6 +956,9 @@ function updateSnapshot(snapshot, options = {}) {
   updateEngageToggle(onics);
 
   const restartReady = health.tailscale_ok && health.dns_ok && health.tcp_ok && !rebootPending;
+  if (mavlinkSendBtn) {
+    mavlinkSendBtn.disabled = !restartReady;
+  }
   serviceRestartButtons.forEach((button) => {
     button.disabled = !restartReady;
   });
@@ -952,6 +997,19 @@ async function sendCommand(path) {
   return res.json();
 }
 
+async function sendJsonCommand(path, payload) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.msg || "Command failed");
+  }
+  return res.json();
+}
+
 engageToggleBtn?.addEventListener("click", async () => {
   if (!engageToggleAction) {
     return;
@@ -976,6 +1034,35 @@ clearBtn?.addEventListener("click", async () => {
     appendLog(`CLEAR FAILED: ${err.message}`);
   } finally {
     clearBtn.disabled = false;
+  }
+});
+
+mavlinkForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!mavlinkCommandInput || !mavlinkOutput) {
+    return;
+  }
+  const command = mavlinkCommandInput.value.trim();
+  if (!command) {
+    mavlinkOutput.textContent = "Enter a MAVLink command to send.";
+    return;
+  }
+  if (mavlinkSendBtn) {
+    mavlinkSendBtn.disabled = true;
+  }
+  mavlinkOutput.textContent = `Sending: ${command}`;
+  try {
+    const data = await sendJsonCommand("/api/mavlink", { command });
+    updateSnapshot(data.snapshot);
+    mavlinkOutput.textContent = data.output || data.msg || "Command sent.";
+    appendLog(`MAVLINK COMMAND SENT: ${command}`);
+  } catch (err) {
+    mavlinkOutput.textContent = `Command failed: ${err.message}`;
+    appendLog(`MAVLINK COMMAND FAILED: ${err.message}`);
+  } finally {
+    if (mavlinkSendBtn) {
+      mavlinkSendBtn.disabled = false;
+    }
   }
 });
 
