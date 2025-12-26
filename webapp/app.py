@@ -107,6 +107,12 @@ REMOTE_LTE_SIGNAL_SCRIPT = os.environ.get(
 ).strip()
 LTE_SIGNAL_TIMEOUT_S = float(os.environ.get("LTE_SIGNAL_TIMEOUT_S", "5.0"))
 NETWORK_INTERFACES = ("eth0", "wlan0", "wwan0")
+DRY_RUN = os.environ.get("WATNE_DRY_RUN", os.environ.get("DRY_RUN", "")).strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 # "Staleness" thresholds (seconds)
 REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
@@ -436,7 +442,7 @@ class OnicsController:
 
         return hostname, username, port, identity_files, proxycommand
 
-    def _handle_ssh_failure(self, err: str) -> None:
+    def _handle_ssh_failure(self, err: str, *, publish: bool = True) -> None:
         if self._needs_login_prompt(err):
             hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
             msg = (
@@ -451,10 +457,20 @@ class OnicsController:
                     f"then run `ssh-copy-id -p {port} {username}@{hostname}` and "
                     f"`ssh -p {port} {username}@{hostname}` to continue."
                 )
-            self._set_login_prompt(True, msg)
+            if publish:
+                self._set_login_prompt(True, msg)
+            else:
+                with self._lock:
+                    self._runtime.login_required = True
+                    self._runtime.login_message = msg
             self._append_log("SSH AUTH REQUIRED: interactive login needed to continue.")
         else:
-            self._set_login_prompt(False, "")
+            if publish:
+                self._set_login_prompt(False, "")
+            else:
+                with self._lock:
+                    self._runtime.login_required = False
+                    self._runtime.login_message = ""
 
     def snapshot(self, *, include_logs: bool = True) -> Dict[str, Any]:
         hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
@@ -729,7 +745,7 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err)
+                self._handle_ssh_failure(err, publish=False)
                 if self._system_backoff_s <= 0.0:
                     self._system_backoff_s = max(3.0, SYSTEM_STATS_CHECK_S)
                 else:
@@ -834,7 +850,7 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err)
+                self._handle_ssh_failure(err, publish=False)
                 stats["lte_signal_error"] = f"SSH error: {err}"
                 self._lte_signal_cache = stats
                 return dict(stats)
@@ -1186,6 +1202,8 @@ class OnicsController:
     # --- SSH operations
 
     def _ssh_connect(self) -> Tuple[Optional[paramiko.SSHClient], str, int]:
+        if DRY_RUN:
+            return None, "Dry run mode enabled; skipping SSH connection.", 0
         hostname, username, port, identity_files, proxycommand = self._resolve_ssh_settings()
         start = time.time()
 
