@@ -106,6 +106,7 @@ REMOTE_LTE_SIGNAL_SCRIPT = os.environ.get(
     "$HOME/Aeronomicon/util/lte-signal-strength.sh",
 ).strip()
 LTE_SIGNAL_TIMEOUT_S = float(os.environ.get("LTE_SIGNAL_TIMEOUT_S", "5.0"))
+NETWORK_INTERFACES = ("eth0", "wlan0", "wwan0")
 
 # "Staleness" thresholds (seconds)
 REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
@@ -498,7 +499,21 @@ class OnicsController:
             self._fail_events_60s.popleft()
 
     @staticmethod
-    def _blank_system_stats() -> Dict[str, Any]:
+    def _blank_network_interfaces() -> Dict[str, Dict[str, Any]]:
+        return {
+            iface: {
+                "present": False,
+                "state": "missing",
+                "carrier": None,
+                "ipv4": "",
+                "ipv6": "",
+                "internet_connected": False,
+            }
+            for iface in NETWORK_INTERFACES
+        }
+
+    @classmethod
+    def _blank_system_stats(cls) -> Dict[str, Any]:
         return {
             "load_1": None,
             "load_5": None,
@@ -510,6 +525,8 @@ class OnicsController:
             "disk_total_bytes": None,
             "disk_used_bytes": None,
             "disk_free_bytes": None,
+            "network_active_interface": "",
+            "network_interfaces": cls._blank_network_interfaces(),
         }
 
     @classmethod
@@ -588,6 +605,37 @@ class OnicsController:
             except ValueError:
                 pass
 
+        if len(parts) >= 5:
+            active_iface = ""
+            interfaces = cls._blank_network_interfaces()
+            for line in parts[4].splitlines():
+                if not line.strip():
+                    continue
+                if line.startswith("active="):
+                    active_iface = line.partition("=")[2].strip()
+                    continue
+                fields = line.split("|")
+                if len(fields) < 5:
+                    continue
+                name, state, carrier, ipv4, ipv6 = fields[:5]
+                if name not in interfaces:
+                    continue
+                entry = interfaces[name]
+                entry["present"] = state != "missing"
+                entry["state"] = state or "unknown"
+                if carrier.strip() == "":
+                    entry["carrier"] = None
+                else:
+                    entry["carrier"] = carrier.strip() == "1"
+                entry["ipv4"] = ipv4.strip()
+                entry["ipv6"] = ipv6.strip()
+                link_up = entry["state"] == "up"
+                has_ip = bool(entry["ipv4"] or entry["ipv6"])
+                carrier_ok = entry["carrier"] is None or entry["carrier"]
+                entry["internet_connected"] = link_up and has_ip and carrier_ok
+            stats["network_active_interface"] = active_iface
+            stats["network_interfaces"] = interfaces
+
         return stats
 
     def _fetch_remote_system_stats(self, client: paramiko.SSHClient) -> Dict[str, Any]:
@@ -602,7 +650,24 @@ class OnicsController:
             "echo $df_line | awk \"{print \\$2, \\$3, \\$4}\"; "
             "else df -k / 2>/dev/null | tail -n 1 | awk \"{print \\$2 * 1024, \\$3 * 1024, \\$4 * 1024}\"; fi; "
             "echo \"---\"; "
-            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0'"
+            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0; "
+            "echo \"---\"; "
+            "active_iface=$(ip route get 1.1.1.1 2>/dev/null | awk \"{for (i=1;i<=NF;i++) if (\\$i==\\\"dev\\\") {print \\$(i+1); exit}}\" ); "
+            "if [ -z \"$active_iface\" ]; then "
+            "active_iface=$(ip route show default 2>/dev/null | "
+            "awk \"NR==1{for (i=1;i<=NF;i++) if (\\$i==\\\"dev\\\") {print \\$(i+1); exit}}\" ); "
+            "fi; "
+            "echo \"active=$active_iface\"; "
+            "for iface in eth0 wlan0 wwan0; do "
+            "if [ -d /sys/class/net/$iface ]; then "
+            "state=$(cat /sys/class/net/$iface/operstate 2>/dev/null); "
+            "carrier=$(cat /sys/class/net/$iface/carrier 2>/dev/null); "
+            "ipv4=$(ip -o -4 addr show dev $iface 2>/dev/null | awk \"{print \\$4}\" | head -n 1); "
+            "ipv6=$(ip -o -6 addr show dev $iface scope global 2>/dev/null | "
+            "awk \"{print \\$4}\" | head -n 1); "
+            "echo \"$iface|$state|$carrier|$ipv4|$ipv6\"; "
+            "else echo \"$iface|missing|||\"; fi; "
+            "done'"
         )
         _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
         output = stdout.read().decode("utf-8", errors="replace")

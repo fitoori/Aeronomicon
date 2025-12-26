@@ -52,6 +52,8 @@ const systemMemoryMeta = document.getElementById("system-memory-meta");
 const systemMemoryGraph = document.getElementById("system-memory-graph");
 const systemDisk = document.getElementById("system-disk");
 const systemDiskMeta = document.getElementById("system-disk-meta");
+const systemNetwork = document.getElementById("system-network");
+const systemNetworkMeta = document.getElementById("system-network-meta");
 const headerLoad = document.getElementById("header-load");
 const headerLoadGraph = document.getElementById("header-load-graph");
 const headerMemory = document.getElementById("header-memory");
@@ -93,6 +95,7 @@ const cards = {
   systemLoad: document.getElementById("system-load-card"),
   systemMemory: document.getElementById("system-memory-card"),
   systemDisk: document.getElementById("system-disk-card"),
+  systemNetwork: document.getElementById("system-network-card"),
 };
 
 function setOfflineState(isOffline) {
@@ -234,6 +237,19 @@ function formatBytes(value) {
 
 function formatUptime(seconds) {
   return formatSeconds(seconds);
+}
+
+const networkInterfaceOrder = ["eth0", "wlan0", "wwan0"];
+
+function formatNetworkInterfaceStatus(name, entry, activeName) {
+  if (!entry || entry.present === false) {
+    return `${name}: missing`;
+  }
+  const state = entry.state ? entry.state.toUpperCase() : "UNKNOWN";
+  const ip = entry.ipv4 || entry.ipv6;
+  const connected = entry.internet_connected ? "CONNECTED" : state;
+  const active = activeName && activeName === name ? " (active)" : "";
+  return `${name}: ${connected}${ip ? ` ${ip}` : ""}${active}`;
 }
 
 const loadHistory = [];
@@ -906,6 +922,34 @@ function updateSnapshot(snapshot, options = {}) {
       } else {
         systemDisk.textContent = "n/a";
         systemDiskMeta.textContent = "Disk telemetry unavailable.";
+      }
+    }
+
+    if (systemNetwork) {
+      const activeInterface = system.network_active_interface || "";
+      const entries = system.network_interfaces || {};
+      let anyConnected = false;
+      let activeConnected = false;
+      const statusLines = networkInterfaceOrder.map((name) => {
+        const entry = entries[name];
+        if (entry?.internet_connected) {
+          anyConnected = true;
+          if (activeInterface === name) {
+            activeConnected = true;
+          }
+        }
+        return formatNetworkInterfaceStatus(name, entry, activeInterface);
+      });
+      systemNetwork.textContent = activeInterface ? `Active: ${activeInterface}` : "Active: n/a";
+      if (systemNetworkMeta) {
+        systemNetworkMeta.textContent = statusLines.join(" · ");
+      }
+      if (activeConnected) {
+        setCardState(cards.systemNetwork, "ok");
+      } else if (anyConnected) {
+        setCardState(cards.systemNetwork, "warn");
+      } else {
+        setCardState(cards.systemNetwork, "danger");
       }
     }
 
