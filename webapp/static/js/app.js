@@ -52,10 +52,12 @@ const systemMemoryMeta = document.getElementById("system-memory-meta");
 const systemMemoryGraph = document.getElementById("system-memory-graph");
 const systemDisk = document.getElementById("system-disk");
 const systemDiskMeta = document.getElementById("system-disk-meta");
+const systemNetwork = document.getElementById("system-network");
+const systemNetworkMeta = document.getElementById("system-network-meta");
 const headerLoad = document.getElementById("header-load");
 const headerLoadGraph = document.getElementById("header-load-graph");
-const headerMemory = document.getElementById("header-memory");
-const headerMemoryGraph = document.getElementById("header-memory-graph");
+const headerData = document.getElementById("header-data");
+const headerDataCard = document.getElementById("header-data-card");
 const headerDisk = document.getElementById("header-disk");
 
 let engageToggleAction = null;
@@ -93,6 +95,7 @@ const cards = {
   systemLoad: document.getElementById("system-load-card"),
   systemMemory: document.getElementById("system-memory-card"),
   systemDisk: document.getElementById("system-disk-card"),
+  systemNetwork: document.getElementById("system-network-card"),
 };
 
 function setOfflineState(isOffline) {
@@ -236,6 +239,26 @@ function formatUptime(seconds) {
   return formatSeconds(seconds);
 }
 
+const networkInterfaceOrder = ["eth0", "wlan0", "wwan0"];
+
+function formatRateBps(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return "n/a";
+  }
+  return `${formatBytes(Number(value))}/s`;
+}
+
+function formatNetworkInterfaceStatus(name, entry, activeName) {
+  if (!entry || entry.present === false) {
+    return `${name}: missing`;
+  }
+  const state = entry.state ? entry.state.toUpperCase() : "UNKNOWN";
+  const ip = entry.ipv4 || entry.ipv6;
+  const connected = entry.internet_connected ? "CONNECTED" : state;
+  const active = activeName && activeName === name ? " (active)" : "";
+  return `${name}: ${connected}${ip ? ` ${ip}` : ""}${active}`;
+}
+
 const loadHistory = [];
 const loadHistoryWindowMs = 5 * 60 * 1000;
 let loadHistoryCpuCount = null;
@@ -257,7 +280,7 @@ function pruneLoadHistory(nowMs) {
 const memoryHistory = [];
 const memoryHistoryWindowMs = 5 * 60 * 1000;
 let memoryHistoryTotal = null;
-const memoryGraphs = [systemMemoryGraph, headerMemoryGraph]
+const memoryGraphs = [systemMemoryGraph]
   .filter(Boolean)
   .map((canvas) => ({
     canvas,
@@ -407,6 +430,30 @@ function recordMemoryPoint(value, total) {
   memoryHistory.push({ ts: Date.now(), value: Number(value) });
   pruneMemoryHistory(Date.now());
   drawAllMemoryGraphs();
+}
+
+const dataRateHistory = [];
+const dataRateWindowMs = 60 * 1000;
+
+function pruneDataRateHistory(nowMs) {
+  const cutoff = nowMs - dataRateWindowMs;
+  while (dataRateHistory.length && dataRateHistory[0].ts < cutoff) {
+    dataRateHistory.shift();
+  }
+}
+
+function recordDataRate(value) {
+  const rate = Number.isFinite(Number(value)) ? Number(value) : 0;
+  dataRateHistory.push({ ts: Date.now(), value: rate });
+  pruneDataRateHistory(Date.now());
+}
+
+function averageDataRate() {
+  if (!dataRateHistory.length) {
+    return null;
+  }
+  const sum = dataRateHistory.reduce((acc, entry) => acc + entry.value, 0);
+  return sum / dataRateHistory.length;
 }
 
 
@@ -827,6 +874,7 @@ function updateSnapshot(snapshot, options = {}) {
 
   if (autopilot && autopilot.system) {
     const system = autopilot.system;
+    const activeInterface = system.network_active_interface || "";
     if (uplinkSignalValue) {
       if (Number.isFinite(system.lte_signal_percent)) {
         uplinkSignalValue.textContent = `${Math.round(system.lte_signal_percent)}%`;
@@ -847,11 +895,13 @@ function updateSnapshot(snapshot, options = {}) {
           ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
           : "n/a";
     }
-    if (headerMemory) {
-      headerMemory.textContent =
-        system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
-          ? formatBytes(system.mem_available_bytes)
-          : "n/a";
+    recordDataRate(system.wwan_metered_rate_bps);
+    if (headerData) {
+      const avgRate = averageDataRate();
+      headerData.textContent = avgRate === null ? "n/a" : formatRateBps(avgRate);
+    }
+    if (headerDataCard) {
+      headerDataCard.classList.toggle("shell__stat-card--accent", activeInterface === "wwan0");
     }
     if (headerDisk) {
       headerDisk.textContent =
@@ -906,6 +956,45 @@ function updateSnapshot(snapshot, options = {}) {
       } else {
         systemDisk.textContent = "n/a";
         systemDiskMeta.textContent = "Disk telemetry unavailable.";
+      }
+    }
+
+    if (systemNetwork) {
+      const entries = system.network_interfaces || {};
+      let anyConnected = false;
+      let activeConnected = false;
+      const statusLines = networkInterfaceOrder.map((name) => {
+        const entry = entries[name];
+        if (entry?.internet_connected) {
+          anyConnected = true;
+          if (activeInterface === name) {
+            activeConnected = true;
+          }
+        }
+        return formatNetworkInterfaceStatus(name, entry, activeInterface);
+      });
+      systemNetwork.textContent = activeInterface ? `Active: ${activeInterface}` : "Active: n/a";
+      if (systemNetworkMeta) {
+        const meteredTotal = system.wwan_metered_total_bytes;
+        const meteredRx = system.wwan_metered_rx_bytes;
+        const meteredTx = system.wwan_metered_tx_bytes;
+        const meteredRate = system.wwan_metered_rate_bps;
+        let meterLine = "";
+        if (activeInterface === "wwan0" && Number.isFinite(meteredTotal)) {
+          const rxText = Number.isFinite(meteredRx) ? formatBytes(meteredRx) : "n/a";
+          const txText = Number.isFinite(meteredTx) ? formatBytes(meteredTx) : "n/a";
+          meterLine = `Metered ${formatBytes(meteredTotal)} (${rxText} rx / ${txText} tx) @ ${formatRateBps(
+            meteredRate
+          )}`;
+        }
+        systemNetworkMeta.textContent = [statusLines.join(" · "), meterLine].filter(Boolean).join(" · ");
+      }
+      if (activeConnected) {
+        setCardState(cards.systemNetwork, "ok");
+      } else if (anyConnected) {
+        setCardState(cards.systemNetwork, "warn");
+      } else {
+        setCardState(cards.systemNetwork, "danger");
       }
     }
 
