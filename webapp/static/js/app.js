@@ -76,8 +76,8 @@ const systemNetwork = document.getElementById("system-network");
 const systemNetworkMeta = document.getElementById("system-network-meta");
 const headerLoad = document.getElementById("header-load");
 const headerLoadGraph = document.getElementById("header-load-graph");
-const headerMemory = document.getElementById("header-memory");
-const headerMemoryGraph = document.getElementById("header-memory-graph");
+const headerData = document.getElementById("header-data");
+const headerDataCard = document.getElementById("header-data-card");
 const headerDisk = document.getElementById("header-disk");
 const mavlinkForm = document.getElementById("mavlink-form");
 const mavlinkCommandInput = document.getElementById("mavlink-command");
@@ -316,7 +316,7 @@ function pruneLoadHistory(nowMs) {
 const memoryHistory = [];
 const memoryHistoryWindowMs = 5 * 60 * 1000;
 let memoryHistoryTotal = null;
-const memoryGraphs = [systemMemoryGraph, headerMemoryGraph]
+const memoryGraphs = [systemMemoryGraph]
   .filter(Boolean)
   .map((canvas) => ({
     canvas,
@@ -935,6 +935,7 @@ function updateSnapshot(snapshot, options = {}) {
 
   if (autopilot && autopilot.system) {
     const system = autopilot.system;
+    const activeInterface = system.network_active_interface || "";
     if (uplinkSignalValue) {
       if (Number.isFinite(system.lte_signal_percent)) {
         uplinkSignalValue.textContent = `${Math.round(system.lte_signal_percent)}%`;
@@ -955,11 +956,11 @@ function updateSnapshot(snapshot, options = {}) {
           ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
           : "n/a";
     }
-    if (headerMemory) {
-      headerMemory.textContent =
-        system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
-          ? formatBytes(system.mem_available_bytes)
-          : "n/a";
+    if (headerData) {
+      headerData.textContent = formatRateBps(system.wwan_metered_avg_bps);
+    }
+    if (headerDataCard) {
+      headerDataCard.classList.toggle("shell__stat-card--accent", activeInterface === "wwan0");
     }
     if (headerDisk) {
       headerDisk.textContent =

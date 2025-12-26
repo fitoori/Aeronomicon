@@ -100,11 +100,9 @@
               </div>
               <p class="health-card__value" id="header-load">n/a</p>
             </div>
-            <div class="health-card shell__stat-card load-card">
-              <div class="load-graph load-graph--header" aria-hidden="true">
-                <canvas id="header-memory-graph" role="img" aria-label="Memory usage history"></canvas>
-              </div>
-              <p class="health-card__value" id="header-memory">n/a</p>
+            <div class="health-card shell__stat-card" id="header-data-card">
+              <p class="health-card__value" id="header-data">n/a</p>
+              <p class="health-card__meta">Data avg 1m</p>
             </div>
             <div class="health-card shell__stat-card shell__stat-card--action">
               <button class="btn btn--engage" id="engage-toggle-btn">ENGAGE</button>
@@ -317,6 +315,11 @@
               <p class="health-card__meta compact-hide" id="system-disk-meta">
                 Disk telemetry unavailable.
               </p>
+              </div>
+              <div class="health-card" id="system-network-card">
+                <h3>Network</h3>
+                <p class="health-card__value" id="system-network">-</p>
+                <p class="health-card__meta" id="system-network-meta">Network telemetry unavailable.</p>
               </div>
               <div class="health-card" id="system-network-card">
                 <h3>Network</h3>

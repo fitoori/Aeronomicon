@@ -388,6 +388,7 @@ class OnicsController:
             "total": 0,
             "rate_bps": 0.0,
         }
+        self._wwan_meter_history: Deque[Tuple[float, int]] = deque()
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -577,6 +578,7 @@ class OnicsController:
             "wwan_metered_tx_bytes": 0,
             "wwan_metered_total_bytes": 0,
             "wwan_metered_rate_bps": 0.0,
+            "wwan_metered_avg_bps": 0.0,
         }
 
     @classmethod
@@ -802,6 +804,8 @@ class OnicsController:
         last_tx = self._wwan_meter.get("last_tx")
         last_mono = self._wwan_meter.get("last_mono")
 
+        has_sample = isinstance(rx_bytes, int) and isinstance(tx_bytes, int)
+        if has_sample and active_iface == "wwan0":
         if active_iface == "wwan0" and isinstance(rx_bytes, int) and isinstance(tx_bytes, int):
             if isinstance(last_rx, int) and isinstance(last_tx, int) and last_mono is not None:
                 delta_rx = max(0, rx_bytes - last_rx)
@@ -814,6 +818,14 @@ class OnicsController:
                 self._wwan_meter["rate_bps"] = (
                     (delta_total / elapsed) if elapsed > 0 else 0.0
                 )
+            else:
+                self._wwan_meter["rate_bps"] = 0.0
+        else:
+            self._wwan_meter["rate_bps"] = 0.0
+
+        if has_sample:
+            self._wwan_meter["last_mono"] = now_m
+
             self._wwan_meter["last_mono"] = now_m
         else:
             self._wwan_meter["rate_bps"] = 0.0
@@ -823,10 +835,26 @@ class OnicsController:
         if isinstance(tx_bytes, int):
             self._wwan_meter["last_tx"] = tx_bytes
 
+        if has_sample:
+            self._wwan_meter_history.append((now_m, int(self._wwan_meter["total"])))
+            cutoff = now_m - 60.0
+            while self._wwan_meter_history and self._wwan_meter_history[0][0] < cutoff:
+                self._wwan_meter_history.popleft()
+            if len(self._wwan_meter_history) >= 2:
+                oldest_t, oldest_total = self._wwan_meter_history[0]
+                newest_t, newest_total = self._wwan_meter_history[-1]
+                elapsed = max(newest_t - oldest_t, 0.0)
+                avg_rate = (newest_total - oldest_total) / elapsed if elapsed > 0 else 0.0
+            else:
+                avg_rate = 0.0
+        else:
+            avg_rate = 0.0
+
         stats["wwan_metered_rx_bytes"] = self._wwan_meter["rx"]
         stats["wwan_metered_tx_bytes"] = self._wwan_meter["tx"]
         stats["wwan_metered_total_bytes"] = self._wwan_meter["total"]
         stats["wwan_metered_rate_bps"] = self._wwan_meter["rate_bps"]
+        stats["wwan_metered_avg_bps"] = avg_rate
         stats["wwan_rx_bytes"] = rx_bytes
         stats["wwan_tx_bytes"] = tx_bytes
         return stats
