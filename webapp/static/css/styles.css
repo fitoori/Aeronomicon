@@ -44,6 +44,10 @@ body.is-offline .shell {
   filter: blur(6px);
 }
 
+body.is-dry-run.is-offline .shell {
+  filter: none;
+}
+
 .shell__header {
   display: flex;
   flex-wrap: wrap;
@@ -643,6 +647,11 @@ body.is-offline .offline-screen {
   background: radial-gradient(circle, rgba(10, 18, 14, 0.96), rgba(3, 6, 5, 0.98));
   z-index: 998;
   transition: opacity 0.4s ease;
+}
+
+body.is-dry-run.is-offline .offline-screen {
+  opacity: 0;
+  pointer-events: none;
 }
 
 body.is-rebooting .shell {

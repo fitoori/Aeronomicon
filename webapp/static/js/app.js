@@ -20,6 +20,24 @@ const loginDismissBtn = document.getElementById("login-dismiss-btn");
 const serviceRestartButtons = document.querySelectorAll("[data-service-restart]");
 const serviceStopButtons = document.querySelectorAll("[data-service-stop]");
 
+let dryRunMode = false;
+let isOffline = false;
+let hasSnapshot = false;
+
+function setLoadingScreenVisible(visible) {
+  if (!loadingScreen) {
+    return;
+  }
+  loadingScreen.classList.toggle("hidden", !visible);
+  loadingScreen.setAttribute("aria-hidden", visible ? "false" : "true");
+}
+
+function setDryRunMode(enabled) {
+  dryRunMode = Boolean(enabled);
+  document.body.classList.toggle("is-dry-run", dryRunMode);
+  setOfflineState(isOffline);
+}
+
 const tailscaleStatus = document.getElementById("tailscale-status");
 const tailscaleBackend = document.getElementById("tailscale-backend");
 const tailscaleMeta = document.getElementById("tailscale-meta");
@@ -95,10 +113,22 @@ const cards = {
   systemDisk: document.getElementById("system-disk-card"),
 };
 
-function setOfflineState(isOffline) {
+function setOfflineState(nextOffline) {
+  isOffline = Boolean(nextOffline);
   document.body.classList.toggle("is-offline", isOffline);
-  if (offlineScreen) {
-    offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
+  if (dryRunMode) {
+    if (offlineScreen) {
+      offlineScreen.setAttribute("aria-hidden", "true");
+    }
+    if (isOffline) {
+      setLoadingScreenVisible(true);
+    } else if (hasSnapshot) {
+      setLoadingScreenVisible(false);
+    }
+  } else {
+    if (offlineScreen) {
+      offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
+    }
   }
 }
 
@@ -688,9 +718,9 @@ function updateSnapshot(snapshot, options = {}) {
     setOfflineState(false);
   }
 
+  hasSnapshot = true;
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
-    loadingScreen.classList.add("hidden");
-    setTimeout(() => loadingScreen.remove(), 600);
+    setLoadingScreenVisible(false);
   }
 
   const { meta, health, onics, autopilot } = snapshot;
@@ -1128,3 +1158,10 @@ fetch("/api/snapshot")
   .catch(() => {
     appendLog("WARNING: Unable to fetch initial snapshot.");
   });
+
+window.onicsSetDryRunMode = setDryRunMode;
+
+const queryDryRun = new URLSearchParams(window.location.search).get("dry_run");
+if (queryDryRun && queryDryRun !== "0" && queryDryRun.toLowerCase() !== "false") {
+  setDryRunMode(true);
+}
