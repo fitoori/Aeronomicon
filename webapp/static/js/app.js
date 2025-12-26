@@ -84,6 +84,24 @@ const mavlinkCommandInput = document.getElementById("mavlink-command");
 const mavlinkSendBtn = document.getElementById("mavlink-send-btn");
 const mavlinkOutput = document.getElementById("mavlink-output");
 
+function formatException(err) {
+  if (err instanceof Error) {
+    return `${err.name}: ${err.message}`;
+  }
+  if (typeof err === "string") {
+    return err;
+  }
+  try {
+    return JSON.stringify(err);
+  } catch (jsonError) {
+    return String(err);
+  }
+}
+
+function logException(context, err) {
+  appendLog(`EXCEPTION (${context}): ${formatException(err)}`);
+}
+
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
@@ -745,19 +763,19 @@ function updateArmingStatus(mavlink) {
   }
   const armed = mavlink?.arming;
   let text = "ARMING: UNKNOWN";
-  let className = "shell__substatus--unknown";
+  let className = "shell__status--unknown";
   if (armed === true) {
     text = "ARMING: ARMED";
-    className = "shell__substatus--armed";
+    className = "shell__status--armed";
   } else if (armed === false) {
     text = "ARMING: DISARMED";
-    className = "shell__substatus--disarmed";
+    className = "shell__status--disarmed";
   }
   armingStatus.textContent = text;
   armingStatus.classList.remove(
-    "shell__substatus--unknown",
-    "shell__substatus--armed",
-    "shell__substatus--disarmed"
+    "shell__status--unknown",
+    "shell__status--armed",
+    "shell__status--disarmed"
   );
   armingStatus.classList.add(className);
 
@@ -1126,7 +1144,7 @@ engageToggleBtn?.addEventListener("click", async () => {
     const data = await sendCommand(engageToggleAction);
     updateSnapshot(data.snapshot);
   } catch (err) {
-    appendLog(`COMMAND FAILED: ${err.message}`);
+    appendLog(`COMMAND FAILED: ${formatException(err)}`);
   }
 });
 
@@ -1138,7 +1156,7 @@ clearBtn?.addEventListener("click", async () => {
     resetTelemetryState();
     updateSnapshot(data.snapshot);
   } catch (err) {
-    appendLog(`CLEAR FAILED: ${err.message}`);
+    appendLog(`CLEAR FAILED: ${formatException(err)}`);
   } finally {
     clearBtn.disabled = false;
   }
@@ -1164,8 +1182,9 @@ mavlinkForm?.addEventListener("submit", async (event) => {
     mavlinkOutput.textContent = data.output || data.msg || "Command sent.";
     appendLog(`MAVLINK COMMAND SENT: ${command}`);
   } catch (err) {
-    mavlinkOutput.textContent = `Command failed: ${err.message}`;
-    appendLog(`MAVLINK COMMAND FAILED: ${err.message}`);
+    const exceptionDetail = formatException(err);
+    mavlinkOutput.textContent = `Command failed: ${exceptionDetail}`;
+    appendLog(`MAVLINK COMMAND FAILED: ${exceptionDetail}`);
   } finally {
     if (mavlinkSendBtn) {
       mavlinkSendBtn.disabled = false;
@@ -1185,7 +1204,7 @@ serviceRestartButtons.forEach((button) => {
       updateSnapshot(data.snapshot);
       appendLog(`RESTART REQUESTED: ${service}`);
     } catch (err) {
-      appendLog(`RESTART FAILED (${service}): ${err.message}`);
+      appendLog(`RESTART FAILED (${service}): ${formatException(err)}`);
     } finally {
       button.disabled = false;
     }
@@ -1204,7 +1223,7 @@ serviceStopButtons.forEach((button) => {
       updateSnapshot(data.snapshot);
       appendLog(`STOP REQUESTED: ${service}`);
     } catch (err) {
-      appendLog(`STOP FAILED (${service}): ${err.message}`);
+      appendLog(`STOP FAILED (${service}): ${formatException(err)}`);
     } finally {
       button.disabled = false;
     }
@@ -1250,7 +1269,7 @@ rebootBtn?.addEventListener("click", async () => {
     updateSnapshot(data.snapshot);
     appendLog("VEHICLE RESTART REQUESTED: reboot now");
   } catch (err) {
-    appendLog(`VEHICLE RESTART FAILED: ${err.message}`);
+    appendLog(`VEHICLE RESTART FAILED: ${formatException(err)}`);
   } finally {
     if (!rebootPending) {
       rebootBtn.disabled = false;
@@ -1270,16 +1289,28 @@ eventSource.onopen = () => {
 };
 
 eventSource.addEventListener("status", (event) => {
-  updateSnapshot(JSON.parse(event.data), { fromStream: true });
+  try {
+    updateSnapshot(JSON.parse(event.data), { fromStream: true });
+  } catch (err) {
+    logException("status stream", err);
+  }
 });
 
 eventSource.addEventListener("state", (event) => {
-  updateSnapshot(JSON.parse(event.data), { fromStream: true });
+  try {
+    updateSnapshot(JSON.parse(event.data), { fromStream: true });
+  } catch (err) {
+    logException("state stream", err);
+  }
 });
 
 eventSource.addEventListener("log", (event) => {
-  const payload = JSON.parse(event.data);
-  appendLog(payload.line);
+  try {
+    const payload = JSON.parse(event.data);
+    appendLog(payload.line);
+  } catch (err) {
+    logException("log stream", err);
+  }
 });
 
 eventSource.onerror = () => {
@@ -1314,14 +1345,30 @@ if (loadGraphs.length) {
 fetch("/api/snapshot")
   .then((res) => res.json())
   .then((snapshot) => {
-    updateSnapshot(snapshot);
-    (snapshot.logs || []).forEach((line) => {
-      parseTelemetry(line);
-    });
+    try {
+      updateSnapshot(snapshot);
+      (snapshot.logs || []).forEach((line) => {
+        parseTelemetry(line);
+      });
+    } catch (err) {
+      logException("snapshot update", err);
+    }
   })
-  .catch(() => {
-    appendLog("WARNING: Unable to fetch initial snapshot.");
+  .catch((err) => {
+    appendLog(`WARNING: Unable to fetch initial snapshot (${formatException(err)}).`);
   });
+
+window.addEventListener("error", (event) => {
+  if (event.error) {
+    logException("window error", event.error);
+  } else if (event.message) {
+    appendLog(`EXCEPTION (window error): ${event.message}`);
+  }
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  logException("unhandled rejection", event.reason);
+});
 
 window.onicsSetDryRunMode = setDryRunMode;
 
