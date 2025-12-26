@@ -1083,6 +1083,13 @@ function updateSnapshot(snapshot, options = {}) {
 function appendLog(line) {
   parseTelemetry(line);
   const renderedLine = formatLogTimestamp(line);
+  if (
+    logView &&
+    logView.childNodes.length === 1 &&
+    logView.childNodes[0].nodeType === Node.TEXT_NODE
+  ) {
+    logView.textContent = "";
+  }
   const div = document.createElement("div");
   div.className = "log-line";
   div.textContent = renderedLine;
