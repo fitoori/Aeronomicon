@@ -893,7 +893,7 @@ class OnicsController:
                     armed = bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
                     result = {{"ok": True, "arming": armed}}
             except Exception as exc:
-                result = {{"ok": False, "error": f"{type(exc).__name__}: {exc}"}}
+                result = {{"ok": False, "error": "{}: {}".format(type(exc).__name__, exc)}}
             print(json.dumps(result))
             PY
             """
