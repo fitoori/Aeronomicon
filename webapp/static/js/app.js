@@ -524,18 +524,15 @@ function formatSystemSummary(system) {
   if (!system) {
     return "System telemetry unavailable.";
   }
-  const load =
-    system.load_1 !== null && system.load_5 !== null && system.load_15 !== null
-      ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
-      : "n/a";
-  const mem =
-    system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
-      ? `${formatBytes(system.mem_available_bytes)} free`
-      : "n/a";
-  const disk =
-    system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
-      ? `${formatBytes(system.disk_free_bytes)} free`
-      : "n/a";
+  const loadReady =
+    Number.isFinite(system.load_1) && Number.isFinite(system.load_5) && Number.isFinite(system.load_15);
+  const load = loadReady
+    ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
+    : "n/a";
+  const mem = Number.isFinite(system.mem_available_bytes)
+    ? `${formatBytes(system.mem_available_bytes)} free`
+    : "n/a";
+  const disk = Number.isFinite(system.disk_free_bytes) ? `${formatBytes(system.disk_free_bytes)} free` : "n/a";
   return `Load ${load} · Mem ${mem} · Disk ${disk}`;
 }
 
@@ -1002,10 +999,11 @@ function updateSnapshot(snapshot, options = {}) {
         : system.lte_signal_error || "LTE signal unavailable.";
     }
     if (headerLoad) {
-      headerLoad.textContent =
-        system.load_1 !== null && system.load_5 !== null && system.load_15 !== null
-          ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
-          : "n/a";
+      const loadReady =
+        Number.isFinite(system.load_1) && Number.isFinite(system.load_5) && Number.isFinite(system.load_15);
+      headerLoad.textContent = loadReady
+        ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
+        : "n/a";
     }
     if (headerData) {
       headerData.textContent = formatRateBps(system.wwan_metered_avg_bps);
@@ -1015,12 +1013,10 @@ function updateSnapshot(snapshot, options = {}) {
     }
     if (headerDisk) {
       headerDisk.textContent =
-        system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
-          ? formatBytes(system.disk_free_bytes)
-          : "n/a";
+        Number.isFinite(system.disk_free_bytes) ? formatBytes(system.disk_free_bytes) : "n/a";
     }
     if (systemLoad) {
-      if (system.load_1 !== null && system.load_5 !== null && system.load_15 !== null) {
+      if (Number.isFinite(system.load_1) && Number.isFinite(system.load_5) && Number.isFinite(system.load_15)) {
         systemLoad.textContent = `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(
           2
         )}`;
@@ -1028,41 +1024,39 @@ function updateSnapshot(snapshot, options = {}) {
         systemLoad.textContent = "n/a";
       }
       systemLoadMeta.textContent =
-        system.cpu_count !== null && system.cpu_count !== undefined
-        ? `CPU cores: ${system.cpu_count}`
-        : "CPU core count unavailable.";
+        Number.isFinite(system.cpu_count) ? `CPU cores: ${system.cpu_count}` : "CPU core count unavailable.";
     }
-    if (system.load_1 !== null && system.load_1 !== undefined) {
+    if (Number.isFinite(system.load_1)) {
       recordLoadPoint(system.load_1, system.cpu_count);
     }
 
     if (systemMemory) {
-      if (system.mem_total_bytes !== null && system.mem_total_bytes !== undefined) {
+      if (Number.isFinite(system.mem_total_bytes)) {
         const used = system.mem_used_bytes ?? 0;
         systemMemory.textContent = `${formatBytes(used)} / ${formatBytes(system.mem_total_bytes)}`;
         systemMemoryMeta.textContent =
-          system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
-          ? `Available ${formatBytes(system.mem_available_bytes)}`
-          : "Memory availability unknown.";
+          Number.isFinite(system.mem_available_bytes)
+            ? `Available ${formatBytes(system.mem_available_bytes)}`
+            : "Memory availability unknown.";
       } else {
         systemMemory.textContent = "n/a";
         systemMemoryMeta.textContent = "Memory telemetry unavailable.";
       }
     }
 
-    if (system.mem_used_bytes !== null && system.mem_used_bytes !== undefined) {
+    if (Number.isFinite(system.mem_used_bytes)) {
       recordMemoryPoint(system.mem_used_bytes, system.mem_total_bytes);
     }
 
     if (systemDisk) {
-      if (system.disk_total_bytes !== null && system.disk_total_bytes !== undefined) {
+      if (Number.isFinite(system.disk_total_bytes)) {
         systemDisk.textContent = `${formatBytes(system.disk_used_bytes ?? 0)} / ${formatBytes(
           system.disk_total_bytes
         )}`;
         systemDiskMeta.textContent =
-          system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
-          ? `Free ${formatBytes(system.disk_free_bytes)}`
-          : "Disk availability unknown.";
+          Number.isFinite(system.disk_free_bytes)
+            ? `Free ${formatBytes(system.disk_free_bytes)}`
+            : "Disk availability unknown.";
       } else {
         systemDisk.textContent = "n/a";
         systemDiskMeta.textContent = "Disk telemetry unavailable.";
