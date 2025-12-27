@@ -346,6 +346,13 @@ function formatNetworkInterfaceStatus(name, entry, activeName) {
   return `${name}: ${connected}${ip ? ` ${ip}` : ""}${active}`;
 }
 
+function normalizeNetworkEntry(entry) {
+  if (!entry) {
+    return { present: false, state: "missing", internet_connected: false };
+  }
+  return entry;
+}
+
 const loadHistory = [];
 const loadHistoryWindowMs = 5 * 60 * 1000;
 let loadHistoryCpuCount = null;
@@ -1025,6 +1032,11 @@ function updateSnapshot(snapshot, options = {}) {
       }
       systemLoadMeta.textContent =
         Number.isFinite(system.cpu_count) ? `CPU cores: ${system.cpu_count}` : "CPU core count unavailable.";
+      if (!system.telemetry_ok) {
+        setCardState(cards.systemLoad, "danger");
+      } else if (system.load_1 !== null) {
+        setCardState(cards.systemLoad, "ok");
+      }
     }
     if (Number.isFinite(system.load_1)) {
       recordLoadPoint(system.load_1, system.cpu_count);
@@ -1041,6 +1053,11 @@ function updateSnapshot(snapshot, options = {}) {
       } else {
         systemMemory.textContent = "n/a";
         systemMemoryMeta.textContent = "Memory telemetry unavailable.";
+      }
+      if (!system.telemetry_ok) {
+        setCardState(cards.systemMemory, "danger");
+      } else if (system.mem_total_bytes !== null) {
+        setCardState(cards.systemMemory, "ok");
       }
     }
 
@@ -1061,6 +1078,11 @@ function updateSnapshot(snapshot, options = {}) {
         systemDisk.textContent = "n/a";
         systemDiskMeta.textContent = "Disk telemetry unavailable.";
       }
+      if (!system.telemetry_ok) {
+        setCardState(cards.systemDisk, "danger");
+      } else if (system.disk_total_bytes !== null) {
+        setCardState(cards.systemDisk, "ok");
+      }
     }
 
     if (systemNetwork) {
@@ -1069,7 +1091,7 @@ function updateSnapshot(snapshot, options = {}) {
       let anyConnected = false;
       let activeConnected = false;
       const statusLines = networkInterfaceOrder.map((name) => {
-        const entry = entries[name];
+        const entry = normalizeNetworkEntry(entries[name]);
         if (entry?.internet_connected) {
           anyConnected = true;
           if (activeInterface === name) {
@@ -1094,7 +1116,9 @@ function updateSnapshot(snapshot, options = {}) {
         }
         systemNetworkMeta.textContent = [statusLines.join(" · "), meterLine].filter(Boolean).join(" · ");
       }
-      if (activeConnected) {
+      if (!system.telemetry_ok) {
+        setCardState(cards.systemNetwork, "danger");
+      } else if (activeConnected) {
         setCardState(cards.systemNetwork, "ok");
       } else if (anyConnected) {
         setCardState(cards.systemNetwork, "warn");
