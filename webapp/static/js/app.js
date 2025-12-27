@@ -5,8 +5,6 @@ const loadingScreen = document.getElementById("loading-screen");
 const offlineScreen = document.getElementById("offline-screen");
 const rebootScreen = document.getElementById("reboot-screen");
 const connectionPill = document.getElementById("connection-pill");
-const armingStatus = document.getElementById("arming-status");
-const armingMeta = document.getElementById("arming-meta");
 const logoMenuButton = document.getElementById("logo-menu-button");
 const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
@@ -20,25 +18,6 @@ const loginKeygenCommand = document.getElementById("login-keygen-command");
 const loginOpenBtn = document.getElementById("login-open-btn");
 const loginDismissBtn = document.getElementById("login-dismiss-btn");
 const serviceRestartButtons = document.querySelectorAll("[data-service-restart]");
-const serviceStopButtons = document.querySelectorAll("[data-service-stop]");
-
-let dryRunMode = false;
-let isOffline = false;
-let hasSnapshot = false;
-
-function setLoadingScreenVisible(visible) {
-  if (!loadingScreen) {
-    return;
-  }
-  loadingScreen.classList.toggle("hidden", !visible);
-  loadingScreen.setAttribute("aria-hidden", visible ? "false" : "true");
-}
-
-function setDryRunMode(enabled) {
-  dryRunMode = Boolean(enabled);
-  document.body.classList.toggle("is-dry-run", dryRunMode);
-  setOfflineState(isOffline);
-}
 
 const tailscaleStatus = document.getElementById("tailscale-status");
 const tailscaleBackend = document.getElementById("tailscale-backend");
@@ -72,57 +51,15 @@ const systemMemoryMeta = document.getElementById("system-memory-meta");
 const systemMemoryGraph = document.getElementById("system-memory-graph");
 const systemDisk = document.getElementById("system-disk");
 const systemDiskMeta = document.getElementById("system-disk-meta");
-const systemNetwork = document.getElementById("system-network");
-const systemNetworkMeta = document.getElementById("system-network-meta");
 const headerLoad = document.getElementById("header-load");
 const headerLoadGraph = document.getElementById("header-load-graph");
-const headerData = document.getElementById("header-data");
-const headerDataCard = document.getElementById("header-data-card");
+const headerMemory = document.getElementById("header-memory");
+const headerMemoryGraph = document.getElementById("header-memory-graph");
 const headerDisk = document.getElementById("header-disk");
-const mavlinkForm = document.getElementById("mavlink-form");
-const mavlinkCommandInput = document.getElementById("mavlink-command");
-const mavlinkSendBtn = document.getElementById("mavlink-send-btn");
-const mavlinkOutput = document.getElementById("mavlink-output");
-const telemetryTabButtons = document.querySelectorAll("[data-telemetry-tab]");
-const telemetryTabPanels = document.querySelectorAll("[data-telemetry-panel]");
-
-function formatException(err) {
-  if (err instanceof Error) {
-    return `${err.name}: ${err.message}`;
-  }
-  if (typeof err === "string") {
-    return err;
-  }
-  try {
-    return JSON.stringify(err);
-  } catch (jsonError) {
-    return String(err);
-  }
-}
-
-function logException(context, err) {
-  appendLog(`EXCEPTION (${context}): ${formatException(err)}`);
-}
 
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
-
-function setTelemetryTab(tabId) {
-  telemetryTabButtons.forEach((button) => {
-    const isActive = button.dataset.telemetryTab === tabId;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-selected", isActive ? "true" : "false");
-  });
-  telemetryTabPanels.forEach((panel) => {
-    const isActive = panel.dataset.telemetryPanel === tabId;
-    panel.classList.toggle("is-active", isActive);
-    panel.hidden = !isActive;
-  });
-  if (clearBtn) {
-    clearBtn.hidden = tabId !== "telemetry-log";
-  }
-}
 
 function setLogoMenuOpen(open) {
   if (!logoMenuButton || !logoMenu) {
@@ -155,40 +92,12 @@ const cards = {
   systemLoad: document.getElementById("system-load-card"),
   systemMemory: document.getElementById("system-memory-card"),
   systemDisk: document.getElementById("system-disk-card"),
-  systemNetwork: document.getElementById("system-network-card"),
 };
 
-function setOfflineState(nextOffline) {
-  isOffline = Boolean(nextOffline);
+function setOfflineState(isOffline) {
   document.body.classList.toggle("is-offline", isOffline);
-  if (dryRunMode) {
-    if (offlineScreen) {
-      offlineScreen.setAttribute("aria-hidden", "true");
-    }
-    if (isOffline) {
-      setLoadingScreenVisible(true);
-    } else if (hasSnapshot) {
-      setLoadingScreenVisible(false);
-    }
-  } else {
-    if (offlineScreen) {
-      offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
-    }
-  }
-}
-
-telemetryTabButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    setTelemetryTab(button.dataset.telemetryTab);
-  });
-});
-
-if (telemetryTabButtons.length) {
-  const defaultTab =
-    document.querySelector("[data-telemetry-tab].is-active")?.dataset.telemetryTab ||
-    telemetryTabButtons[0]?.dataset.telemetryTab;
-  if (defaultTab) {
-    setTelemetryTab(defaultTab);
+  if (offlineScreen) {
+    offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
   }
 }
 
@@ -326,33 +235,6 @@ function formatUptime(seconds) {
   return formatSeconds(seconds);
 }
 
-const networkInterfaceOrder = ["eth0", "wlan0", "wwan0"];
-
-function formatRateBps(value) {
-  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
-    return "n/a";
-  }
-  return `${formatBytes(Number(value))}/s`;
-}
-
-function formatNetworkInterfaceStatus(name, entry, activeName) {
-  if (!entry || entry.present === false) {
-    return `${name}: missing`;
-  }
-  const state = entry.state ? entry.state.toUpperCase() : "UNKNOWN";
-  const ip = entry.ipv4 || entry.ipv6;
-  const connected = entry.internet_connected ? "CONNECTED" : state;
-  const active = activeName && activeName === name ? " (active)" : "";
-  return `${name}: ${connected}${ip ? ` ${ip}` : ""}${active}`;
-}
-
-function normalizeNetworkEntry(entry) {
-  if (!entry) {
-    return { present: false, state: "missing", internet_connected: false };
-  }
-  return entry;
-}
-
 const loadHistory = [];
 const loadHistoryWindowMs = 5 * 60 * 1000;
 let loadHistoryCpuCount = null;
@@ -374,7 +256,7 @@ function pruneLoadHistory(nowMs) {
 const memoryHistory = [];
 const memoryHistoryWindowMs = 5 * 60 * 1000;
 let memoryHistoryTotal = null;
-const memoryGraphs = [systemMemoryGraph]
+const memoryGraphs = [systemMemoryGraph, headerMemoryGraph]
   .filter(Boolean)
   .map((canvas) => ({
     canvas,
@@ -531,15 +413,18 @@ function formatSystemSummary(system) {
   if (!system) {
     return "System telemetry unavailable.";
   }
-  const loadReady =
-    Number.isFinite(system.load_1) && Number.isFinite(system.load_5) && Number.isFinite(system.load_15);
-  const load = loadReady
-    ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
-    : "n/a";
-  const mem = Number.isFinite(system.mem_available_bytes)
-    ? `${formatBytes(system.mem_available_bytes)} free`
-    : "n/a";
-  const disk = Number.isFinite(system.disk_free_bytes) ? `${formatBytes(system.disk_free_bytes)} free` : "n/a";
+  const load =
+    system.load_1 !== null && system.load_5 !== null && system.load_15 !== null
+      ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
+      : "n/a";
+  const mem =
+    system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
+      ? `${formatBytes(system.mem_available_bytes)} free`
+      : "n/a";
+  const disk =
+    system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
+      ? `${formatBytes(system.disk_free_bytes)} free`
+      : "n/a";
   return `Load ${load} · Mem ${mem} · Disk ${disk}`;
 }
 
@@ -794,40 +679,6 @@ function setLoginPrompt(meta, onics) {
   }
 }
 
-function updateArmingStatus(mavlink) {
-  if (!armingStatus || !armingMeta) {
-    return;
-  }
-  const armed = mavlink?.arming;
-  let text = "ARMING: UNKNOWN";
-  let className = "shell__status--unknown";
-  if (armed === true) {
-    text = "ARMING: ARMED";
-    className = "shell__status--armed";
-  } else if (armed === false) {
-    text = "ARMING: DISARMED";
-    className = "shell__status--disarmed";
-  }
-  armingStatus.textContent = text;
-  armingStatus.classList.remove(
-    "shell__status--unknown",
-    "shell__status--armed",
-    "shell__status--disarmed"
-  );
-  armingStatus.classList.add(className);
-
-  const heartbeatAge = mavlink?.last_heartbeat_iso
-    ? ageSecondsFromTimestamp(mavlink.last_heartbeat_iso)
-    : null;
-  if (heartbeatAge !== null) {
-    armingMeta.textContent = `Last heartbeat ${formatAge(heartbeatAge)}`;
-    setAgeSeverity(armingMeta, heartbeatAge);
-  } else {
-    armingMeta.textContent = mavlink?.detail || "Awaiting MAVLink.";
-    setAgeSeverity(armingMeta, null);
-  }
-}
-
 function updateSnapshot(snapshot, options = {}) {
   if (!snapshot) {
     return;
@@ -836,9 +687,9 @@ function updateSnapshot(snapshot, options = {}) {
     setOfflineState(false);
   }
 
-  hasSnapshot = true;
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
-    setLoadingScreenVisible(false);
+    loadingScreen.classList.add("hidden");
+    setTimeout(() => loadingScreen.remove(), 600);
   }
 
   const { meta, health, onics, autopilot } = snapshot;
@@ -869,36 +720,21 @@ function updateSnapshot(snapshot, options = {}) {
     }
   }
   setRebootOverlay(rebootPending);
-  const systemNetwork = autopilot?.system;
-  const activeInterface = systemNetwork?.network_active_interface || "";
-  const interfaceEntries = systemNetwork?.network_interfaces || {};
-  const wwanEntry = interfaceEntries?.wwan0;
-  const lteActiveConnected = activeInterface === "wwan0" && wwanEntry?.internet_connected;
-  const showLte = lteActiveConnected && !health.los && !linkDegraded;
-  connectionPill.classList.toggle("shell__status--lte", showLte);
-  if (showLte) {
-    connectionPill.textContent = "LINK: LTE";
-    connectionPill.style.borderColor = "";
-    connectionPill.style.color = "";
-  } else {
-    connectionPill.textContent = health.los
-      ? "LINK: LOS"
-      : linkDegraded
-        ? "LINK: DEGRADED"
-        : "LINK: OK";
-    connectionPill.style.borderColor = health.los
-      ? "rgba(249,115,22,0.6)"
-      : linkDegraded
-        ? "rgba(245,158,11,0.6)"
-        : "rgba(74,222,128,0.5)";
-    connectionPill.style.color = health.los
-      ? "#f97316"
-      : linkDegraded
-        ? "#f59e0b"
-        : "#4ade80";
-  }
-
-  updateArmingStatus(autopilot?.mavlink);
+  connectionPill.textContent = health.los
+    ? "LINK: LOS"
+    : linkDegraded
+      ? "LINK: DEGRADED"
+      : "LINK: OK";
+  connectionPill.style.borderColor = health.los
+    ? "rgba(249,115,22,0.6)"
+    : linkDegraded
+      ? "rgba(245,158,11,0.6)"
+      : "rgba(74,222,128,0.5)";
+  connectionPill.style.color = health.los
+    ? "#f97316"
+    : linkDegraded
+      ? "#f59e0b"
+      : "#4ade80";
 
   if (onicsState) {
     onicsState.textContent = onics.state;
@@ -990,7 +826,6 @@ function updateSnapshot(snapshot, options = {}) {
 
   if (autopilot && autopilot.system) {
     const system = autopilot.system;
-    const activeInterface = system.network_active_interface || "";
     if (uplinkSignalValue) {
       if (Number.isFinite(system.lte_signal_percent)) {
         uplinkSignalValue.textContent = `${Math.round(system.lte_signal_percent)}%`;
@@ -1006,24 +841,25 @@ function updateSnapshot(snapshot, options = {}) {
         : system.lte_signal_error || "LTE signal unavailable.";
     }
     if (headerLoad) {
-      const loadReady =
-        Number.isFinite(system.load_1) && Number.isFinite(system.load_5) && Number.isFinite(system.load_15);
-      headerLoad.textContent = loadReady
-        ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
-        : "n/a";
+      headerLoad.textContent =
+        system.load_1 !== null && system.load_5 !== null && system.load_15 !== null
+          ? `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(2)}`
+          : "n/a";
     }
-    if (headerData) {
-      headerData.textContent = formatRateBps(system.wwan_metered_avg_bps);
-    }
-    if (headerDataCard) {
-      headerDataCard.classList.toggle("shell__stat-card--accent", activeInterface === "wwan0");
+    if (headerMemory) {
+      headerMemory.textContent =
+        system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
+          ? formatBytes(system.mem_available_bytes)
+          : "n/a";
     }
     if (headerDisk) {
       headerDisk.textContent =
-        Number.isFinite(system.disk_free_bytes) ? formatBytes(system.disk_free_bytes) : "n/a";
+        system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
+          ? formatBytes(system.disk_free_bytes)
+          : "n/a";
     }
     if (systemLoad) {
-      if (Number.isFinite(system.load_1) && Number.isFinite(system.load_5) && Number.isFinite(system.load_15)) {
+      if (system.load_1 !== null && system.load_5 !== null && system.load_15 !== null) {
         systemLoad.textContent = `${system.load_1.toFixed(2)} / ${system.load_5.toFixed(2)} / ${system.load_15.toFixed(
           2
         )}`;
@@ -1031,99 +867,44 @@ function updateSnapshot(snapshot, options = {}) {
         systemLoad.textContent = "n/a";
       }
       systemLoadMeta.textContent =
-        Number.isFinite(system.cpu_count) ? `CPU cores: ${system.cpu_count}` : "CPU core count unavailable.";
-      if (!system.telemetry_ok) {
-        setCardState(cards.systemLoad, "danger");
-      } else if (system.load_1 !== null) {
-        setCardState(cards.systemLoad, "ok");
-      }
+        system.cpu_count !== null && system.cpu_count !== undefined
+        ? `CPU cores: ${system.cpu_count}`
+        : "CPU core count unavailable.";
     }
-    if (Number.isFinite(system.load_1)) {
+    if (system.load_1 !== null && system.load_1 !== undefined) {
       recordLoadPoint(system.load_1, system.cpu_count);
     }
 
     if (systemMemory) {
-      if (Number.isFinite(system.mem_total_bytes)) {
+      if (system.mem_total_bytes !== null && system.mem_total_bytes !== undefined) {
         const used = system.mem_used_bytes ?? 0;
         systemMemory.textContent = `${formatBytes(used)} / ${formatBytes(system.mem_total_bytes)}`;
         systemMemoryMeta.textContent =
-          Number.isFinite(system.mem_available_bytes)
-            ? `Available ${formatBytes(system.mem_available_bytes)}`
-            : "Memory availability unknown.";
+          system.mem_available_bytes !== null && system.mem_available_bytes !== undefined
+          ? `Available ${formatBytes(system.mem_available_bytes)}`
+          : "Memory availability unknown.";
       } else {
         systemMemory.textContent = "n/a";
         systemMemoryMeta.textContent = "Memory telemetry unavailable.";
       }
-      if (!system.telemetry_ok) {
-        setCardState(cards.systemMemory, "danger");
-      } else if (system.mem_total_bytes !== null) {
-        setCardState(cards.systemMemory, "ok");
-      }
     }
 
-    if (Number.isFinite(system.mem_used_bytes)) {
+    if (system.mem_used_bytes !== null && system.mem_used_bytes !== undefined) {
       recordMemoryPoint(system.mem_used_bytes, system.mem_total_bytes);
     }
 
     if (systemDisk) {
-      if (Number.isFinite(system.disk_total_bytes)) {
+      if (system.disk_total_bytes !== null && system.disk_total_bytes !== undefined) {
         systemDisk.textContent = `${formatBytes(system.disk_used_bytes ?? 0)} / ${formatBytes(
           system.disk_total_bytes
         )}`;
         systemDiskMeta.textContent =
-          Number.isFinite(system.disk_free_bytes)
-            ? `Free ${formatBytes(system.disk_free_bytes)}`
-            : "Disk availability unknown.";
+          system.disk_free_bytes !== null && system.disk_free_bytes !== undefined
+          ? `Free ${formatBytes(system.disk_free_bytes)}`
+          : "Disk availability unknown.";
       } else {
         systemDisk.textContent = "n/a";
         systemDiskMeta.textContent = "Disk telemetry unavailable.";
-      }
-      if (!system.telemetry_ok) {
-        setCardState(cards.systemDisk, "danger");
-      } else if (system.disk_total_bytes !== null) {
-        setCardState(cards.systemDisk, "ok");
-      }
-    }
-
-    if (systemNetwork) {
-      const activeInterface = system.network_active_interface || "";
-      const entries = system.network_interfaces || {};
-      let anyConnected = false;
-      let activeConnected = false;
-      const statusLines = networkInterfaceOrder.map((name) => {
-        const entry = normalizeNetworkEntry(entries[name]);
-        if (entry?.internet_connected) {
-          anyConnected = true;
-          if (activeInterface === name) {
-            activeConnected = true;
-          }
-        }
-        return formatNetworkInterfaceStatus(name, entry, activeInterface);
-      });
-      systemNetwork.textContent = activeInterface ? `Active: ${activeInterface}` : "Active: n/a";
-      if (systemNetworkMeta) {
-        const meteredTotal = system.wwan_metered_total_bytes;
-        const meteredRx = system.wwan_metered_rx_bytes;
-        const meteredTx = system.wwan_metered_tx_bytes;
-        const meteredRate = system.wwan_metered_rate_bps;
-        let meterLine = "";
-        if (activeInterface === "wwan0" && Number.isFinite(meteredTotal)) {
-          const rxText = Number.isFinite(meteredRx) ? formatBytes(meteredRx) : "n/a";
-          const txText = Number.isFinite(meteredTx) ? formatBytes(meteredTx) : "n/a";
-          meterLine = `Metered ${formatBytes(meteredTotal)} (${rxText} rx / ${txText} tx) @ ${formatRateBps(
-            meteredRate
-          )}`;
-        }
-        systemNetworkMeta.textContent = [statusLines.join(" · "), meterLine].filter(Boolean).join(" · ");
-      }
-      if (!system.telemetry_ok) {
-        setCardState(cards.systemNetwork, "danger");
-      } else if (activeConnected) {
-        setCardState(cards.systemNetwork, "ok");
-      } else if (anyConnected) {
-        setCardState(cards.systemNetwork, "warn");
-      } else {
-        setCardState(cards.systemNetwork, "danger");
       }
     }
 
@@ -1132,17 +913,8 @@ function updateSnapshot(snapshot, options = {}) {
   updateEngageToggle(onics);
 
   const restartReady = health.tailscale_ok && health.dns_ok && health.tcp_ok && !rebootPending;
-  if (mavlinkSendBtn) {
-    mavlinkSendBtn.disabled = !restartReady;
-  }
   serviceRestartButtons.forEach((button) => {
     button.disabled = !restartReady;
-  });
-  serviceStopButtons.forEach((button) => {
-    const serviceKey = button.getAttribute("data-service-stop");
-    const service = serviceKey ? autopilot?.services?.[serviceKey] : null;
-    const canStop = restartReady && service?.active;
-    button.disabled = !canStop;
   });
   if (rebootBtn) {
     rebootBtn.disabled = !restartReady;
@@ -1152,13 +924,6 @@ function updateSnapshot(snapshot, options = {}) {
 function appendLog(line) {
   parseTelemetry(line);
   const renderedLine = formatLogTimestamp(line);
-  if (
-    logView &&
-    logView.childNodes.length === 1 &&
-    logView.childNodes[0].nodeType === Node.TEXT_NODE
-  ) {
-    logView.textContent = "";
-  }
   const div = document.createElement("div");
   div.className = "log-line";
   div.textContent = renderedLine;
@@ -1180,19 +945,6 @@ async function sendCommand(path) {
   return res.json();
 }
 
-async function sendJsonCommand(path, payload) {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.msg || "Command failed");
-  }
-  return res.json();
-}
-
 engageToggleBtn?.addEventListener("click", async () => {
   if (!engageToggleAction) {
     return;
@@ -1202,7 +954,7 @@ engageToggleBtn?.addEventListener("click", async () => {
     const data = await sendCommand(engageToggleAction);
     updateSnapshot(data.snapshot);
   } catch (err) {
-    appendLog(`COMMAND FAILED: ${formatException(err)}`);
+    appendLog(`COMMAND FAILED: ${err.message}`);
   }
 });
 
@@ -1214,39 +966,9 @@ clearBtn?.addEventListener("click", async () => {
     resetTelemetryState();
     updateSnapshot(data.snapshot);
   } catch (err) {
-    appendLog(`CLEAR FAILED: ${formatException(err)}`);
+    appendLog(`CLEAR FAILED: ${err.message}`);
   } finally {
     clearBtn.disabled = false;
-  }
-});
-
-mavlinkForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!mavlinkCommandInput || !mavlinkOutput) {
-    return;
-  }
-  const command = mavlinkCommandInput.value.trim();
-  if (!command) {
-    mavlinkOutput.textContent = "Enter a MAVLink command to send.";
-    return;
-  }
-  if (mavlinkSendBtn) {
-    mavlinkSendBtn.disabled = true;
-  }
-  mavlinkOutput.textContent = `Sending: ${command}`;
-  try {
-    const data = await sendJsonCommand("/api/mavlink", { command });
-    updateSnapshot(data.snapshot);
-    mavlinkOutput.textContent = data.output || data.msg || "Command sent.";
-    appendLog(`MAVLINK COMMAND SENT: ${command}`);
-  } catch (err) {
-    const exceptionDetail = formatException(err);
-    mavlinkOutput.textContent = `Command failed: ${exceptionDetail}`;
-    appendLog(`MAVLINK COMMAND FAILED: ${exceptionDetail}`);
-  } finally {
-    if (mavlinkSendBtn) {
-      mavlinkSendBtn.disabled = false;
-    }
   }
 });
 
@@ -1262,26 +984,7 @@ serviceRestartButtons.forEach((button) => {
       updateSnapshot(data.snapshot);
       appendLog(`RESTART REQUESTED: ${service}`);
     } catch (err) {
-      appendLog(`RESTART FAILED (${service}): ${formatException(err)}`);
-    } finally {
-      button.disabled = false;
-    }
-  });
-});
-
-serviceStopButtons.forEach((button) => {
-  button.addEventListener("click", async () => {
-    const service = button.getAttribute("data-service-stop");
-    if (!service) {
-      return;
-    }
-    button.disabled = true;
-    try {
-      const data = await sendCommand(`/api/services/${service}/stop`);
-      updateSnapshot(data.snapshot);
-      appendLog(`STOP REQUESTED: ${service}`);
-    } catch (err) {
-      appendLog(`STOP FAILED (${service}): ${formatException(err)}`);
+      appendLog(`RESTART FAILED (${service}): ${err.message}`);
     } finally {
       button.disabled = false;
     }
@@ -1327,7 +1030,7 @@ rebootBtn?.addEventListener("click", async () => {
     updateSnapshot(data.snapshot);
     appendLog("VEHICLE RESTART REQUESTED: reboot now");
   } catch (err) {
-    appendLog(`VEHICLE RESTART FAILED: ${formatException(err)}`);
+    appendLog(`VEHICLE RESTART FAILED: ${err.message}`);
   } finally {
     if (!rebootPending) {
       rebootBtn.disabled = false;
@@ -1347,28 +1050,16 @@ eventSource.onopen = () => {
 };
 
 eventSource.addEventListener("status", (event) => {
-  try {
-    updateSnapshot(JSON.parse(event.data), { fromStream: true });
-  } catch (err) {
-    logException("status stream", err);
-  }
+  updateSnapshot(JSON.parse(event.data), { fromStream: true });
 });
 
 eventSource.addEventListener("state", (event) => {
-  try {
-    updateSnapshot(JSON.parse(event.data), { fromStream: true });
-  } catch (err) {
-    logException("state stream", err);
-  }
+  updateSnapshot(JSON.parse(event.data), { fromStream: true });
 });
 
 eventSource.addEventListener("log", (event) => {
-  try {
-    const payload = JSON.parse(event.data);
-    appendLog(payload.line);
-  } catch (err) {
-    logException("log stream", err);
-  }
+  const payload = JSON.parse(event.data);
+  appendLog(payload.line);
 });
 
 eventSource.onerror = () => {
@@ -1403,34 +1094,11 @@ if (loadGraphs.length) {
 fetch("/api/snapshot")
   .then((res) => res.json())
   .then((snapshot) => {
-    try {
-      updateSnapshot(snapshot);
-      (snapshot.logs || []).forEach((line) => {
-        parseTelemetry(line);
-      });
-    } catch (err) {
-      logException("snapshot update", err);
-    }
+    updateSnapshot(snapshot);
+    (snapshot.logs || []).forEach((line) => {
+      parseTelemetry(line);
+    });
   })
-  .catch((err) => {
-    appendLog(`WARNING: Unable to fetch initial snapshot (${formatException(err)}).`);
+  .catch(() => {
+    appendLog("WARNING: Unable to fetch initial snapshot.");
   });
-
-window.addEventListener("error", (event) => {
-  if (event.error) {
-    logException("window error", event.error);
-  } else if (event.message) {
-    appendLog(`EXCEPTION (window error): ${event.message}`);
-  }
-});
-
-window.addEventListener("unhandledrejection", (event) => {
-  logException("unhandled rejection", event.reason);
-});
-
-window.onicsSetDryRunMode = setDryRunMode;
-
-const queryDryRun = new URLSearchParams(window.location.search).get("dry_run");
-if (queryDryRun && queryDryRun !== "0" && queryDryRun.toLowerCase() !== "false") {
-  setDryRunMode(true);
-}

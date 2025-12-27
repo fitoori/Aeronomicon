@@ -43,7 +43,6 @@ import sys
 import threading
 import time
 import traceback
-import textwrap
 from collections import deque
 from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple
 
@@ -52,7 +51,7 @@ from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple
 _missing: List[str] = []
 
 try:
-    from flask import Flask, Response, jsonify, render_template, request
+    from flask import Flask, Response, jsonify, render_template
     from werkzeug.serving import WSGIRequestHandler, make_server
 except Exception:  # pragma: no cover
     _missing.append("flask")
@@ -107,21 +106,6 @@ REMOTE_LTE_SIGNAL_SCRIPT = os.environ.get(
     "$HOME/Aeronomicon/util/lte-signal-strength.sh",
 ).strip()
 LTE_SIGNAL_TIMEOUT_S = float(os.environ.get("LTE_SIGNAL_TIMEOUT_S", "5.0"))
-NETWORK_INTERFACES = ("eth0", "wlan0", "wwan0")
-DRY_RUN = os.environ.get("WATNE_DRY_RUN", os.environ.get("DRY_RUN", "")).strip().lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
-
-# MAVLink status & command routing
-MAVLINK_ENDPOINT = os.environ.get("WATNE_MAVLINK_ENDPOINT", "udp:127.0.0.1:14550").strip()
-MAVLINK_STATUS_CHECK_S = float(os.environ.get("MAVLINK_STATUS_CHECK_S", "4.0"))
-MAVLINK_STATUS_TIMEOUT_S = float(os.environ.get("MAVLINK_STATUS_TIMEOUT_S", "3.0"))
-MAVLINK_COMMAND_TIMEOUT_S = float(os.environ.get("MAVLINK_COMMAND_TIMEOUT_S", "8.0"))
-MAVLINK_COMMAND_MAX_LEN = int(os.environ.get("MAVLINK_COMMAND_MAX_LEN", "120"))
-MAVPROXY_CMD = os.environ.get("WATNE_MAVPROXY_CMD", "/home/pi/.local/bin/mavproxy.py").strip()
 
 # "Staleness" thresholds (seconds)
 REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
@@ -315,7 +299,6 @@ class OnicsRuntime:
 class AutopilotHealth:
     services: Dict[str, Dict[str, Any]] = dataclasses.field(default_factory=dict)
     system: Dict[str, Any] = dataclasses.field(default_factory=dict)
-    mavlink: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 # ---- ONICS-T controller ------------------------------------------------------
@@ -350,12 +333,6 @@ class OnicsController:
                 },
             },
             system={},
-            mavlink={
-                "status": "UNKNOWN",
-                "detail": "Awaiting MAVLink.",
-                "arming": None,
-                "last_heartbeat_iso": None,
-            },
         )
         self._stop_requested = False
         self._ssh: Optional[paramiko.SSHClient] = None
@@ -371,24 +348,11 @@ class OnicsController:
         self._last_service_check = 0.0
         self._last_lte_check = 0.0
         self._last_system_check = 0.0
-        self._last_mavlink_check = 0.0
         self._lte_signal_cache: Dict[str, Any] = {}
         self._service_backoff_until = 0.0
         self._service_backoff_s = 0.0
         self._system_backoff_until = 0.0
         self._system_backoff_s = 0.0
-        self._mavlink_backoff_until = 0.0
-        self._mavlink_backoff_s = 0.0
-        self._wwan_meter = {
-            "last_rx": None,
-            "last_tx": None,
-            "last_mono": None,
-            "rx": 0,
-            "tx": 0,
-            "total": 0,
-            "rate_bps": 0.0,
-        }
-        self._wwan_meter_history: Deque[Tuple[float, int]] = deque()
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -462,7 +426,7 @@ class OnicsController:
 
         return hostname, username, port, identity_files, proxycommand
 
-    def _handle_ssh_failure(self, err: str, *, publish: bool = True) -> None:
+    def _handle_ssh_failure(self, err: str) -> None:
         if self._needs_login_prompt(err):
             hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
             msg = (
@@ -477,20 +441,10 @@ class OnicsController:
                     f"then run `ssh-copy-id -p {port} {username}@{hostname}` and "
                     f"`ssh -p {port} {username}@{hostname}` to continue."
                 )
-            if publish:
-                self._set_login_prompt(True, msg)
-            else:
-                with self._lock:
-                    self._runtime.login_required = True
-                    self._runtime.login_message = msg
+            self._set_login_prompt(True, msg)
             self._append_log("SSH AUTH REQUIRED: interactive login needed to continue.")
         else:
-            if publish:
-                self._set_login_prompt(False, "")
-            else:
-                with self._lock:
-                    self._runtime.login_required = False
-                    self._runtime.login_message = ""
+            self._set_login_prompt(False, "")
 
     def snapshot(self, *, include_logs: bool = True) -> Dict[str, Any]:
         hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
@@ -544,23 +498,8 @@ class OnicsController:
             self._fail_events_60s.popleft()
 
     @staticmethod
-    def _blank_network_interfaces() -> Dict[str, Dict[str, Any]]:
+    def _blank_system_stats() -> Dict[str, Any]:
         return {
-            iface: {
-                "present": False,
-                "state": "missing",
-                "carrier": None,
-                "ipv4": "",
-                "ipv6": "",
-                "internet_connected": False,
-            }
-            for iface in NETWORK_INTERFACES
-        }
-
-    @classmethod
-    def _blank_system_stats(cls) -> Dict[str, Any]:
-        return {
-            "telemetry_ok": False,
             "load_1": None,
             "load_5": None,
             "load_15": None,
@@ -571,16 +510,6 @@ class OnicsController:
             "disk_total_bytes": None,
             "disk_used_bytes": None,
             "disk_free_bytes": None,
-            "network_active_interface": "",
-            "network_interfaces": cls._blank_network_interfaces(),
-            "uptime_s": None,
-            "wwan_rx_bytes": None,
-            "wwan_tx_bytes": None,
-            "wwan_metered_rx_bytes": 0,
-            "wwan_metered_tx_bytes": 0,
-            "wwan_metered_total_bytes": 0,
-            "wwan_metered_rate_bps": 0.0,
-            "wwan_metered_avg_bps": 0.0,
         }
 
     @classmethod
@@ -589,7 +518,6 @@ class OnicsController:
         parts = output.split("\n---\n")
         if len(parts) < 4:
             return stats
-        stats["telemetry_ok"] = True
 
         load_line = parts[0].strip().splitlines()
         if load_line:
@@ -660,60 +588,6 @@ class OnicsController:
             except ValueError:
                 pass
 
-        if len(parts) >= 5:
-            active_iface = ""
-            interfaces = cls._blank_network_interfaces()
-            for line in parts[4].splitlines():
-                if not line.strip():
-                    continue
-                if line.startswith("active="):
-                    active_iface = line.partition("=")[2].strip()
-                    continue
-                fields = line.split("|")
-                if len(fields) < 2:
-                    continue
-                if len(fields) < 5:
-                    fields.extend([""] * (5 - len(fields)))
-                name, state, carrier, ipv4, ipv6 = fields[:5]
-                if name not in interfaces:
-                    continue
-                entry = interfaces[name]
-                entry["present"] = state != "missing"
-                entry["state"] = state or "unknown"
-                if carrier.strip() == "":
-                    entry["carrier"] = None
-                else:
-                    entry["carrier"] = carrier.strip() == "1"
-                entry["ipv4"] = ipv4.strip()
-                entry["ipv6"] = ipv6.strip()
-                link_up = entry["state"] == "up"
-                has_ip = bool(entry["ipv4"] or entry["ipv6"])
-                carrier_ok = entry["carrier"] is None or entry["carrier"]
-                entry["internet_connected"] = link_up and has_ip and carrier_ok
-            stats["network_active_interface"] = active_iface
-            stats["network_interfaces"] = interfaces
-
-        if len(parts) >= 6:
-            for line in parts[5].splitlines():
-                if not line.strip():
-                    continue
-                key, _, value = line.partition("=")
-                if key == "wwan_rx":
-                    try:
-                        stats["wwan_rx_bytes"] = int(value.strip())
-                    except ValueError:
-                        pass
-                elif key == "wwan_tx":
-                    try:
-                        stats["wwan_tx_bytes"] = int(value.strip())
-                    except ValueError:
-                        pass
-                elif key == "uptime_s":
-                    try:
-                        stats["uptime_s"] = float(value.strip())
-                    except ValueError:
-                        pass
-
         return stats
 
     def _fetch_remote_system_stats(self, client: paramiko.SSHClient) -> Dict[str, Any]:
@@ -728,42 +602,7 @@ class OnicsController:
             "echo $df_line | awk \"{print \\$2, \\$3, \\$4}\"; "
             "else df -k / 2>/dev/null | tail -n 1 | awk \"{print \\$2 * 1024, \\$3 * 1024, \\$4 * 1024}\"; fi; "
             "echo \"---\"; "
-            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0; "
-            "echo \"---\"; "
-            "active_iface=$(ip route get 1.1.1.1 2>/dev/null | awk \"{for (i=1;i<=NF;i++) if (\\$i==\\\"dev\\\") {print \\$(i+1); exit}}\" ); "
-            "if [ -z \"$active_iface\" ]; then "
-            "active_iface=$(ip route show default 2>/dev/null | "
-            "awk \"NR==1{for (i=1;i<=NF;i++) if (\\$i==\\\"dev\\\") {print \\$(i+1); exit}}\" ); "
-            "fi; "
-            "echo \"active=$active_iface\"; "
-            "for iface in eth0 wlan0 wwan0; do "
-            "if [ -d /sys/class/net/$iface ]; then "
-            "state=$(cat /sys/class/net/$iface/operstate 2>/dev/null); "
-            "carrier=$(cat /sys/class/net/$iface/carrier 2>/dev/null); "
-            "ipv4=$(ip -o -4 addr show dev $iface 2>/dev/null | awk \"{print \\$4}\" | head -n 1); "
-            "ipv6=$(ip -o -6 addr show dev $iface scope global 2>/dev/null | "
-            "awk \"{print \\$4}\" | head -n 1); "
-            "echo \"$iface|$state|$carrier|$ipv4|$ipv6\"; "
-            "else echo \"$iface|missing|||\"; fi; "
-            "done; "
-            "echo \"---\"; "
-            "if [ -d /sys/class/net/wwan0 ]; then "
-            "ifconfig_out=$(ifconfig wwan0 2>/dev/null); "
-            "wwan_rx=$(echo \"$ifconfig_out\" | "
-            "sed -n 's/.*RX packets [0-9]* *bytes \\([0-9]*\\).*/\\1/p; "
-            "s/.*RX bytes:\\([0-9]*\\).*/\\1/p' | head -n 1); "
-            "wwan_tx=$(echo \"$ifconfig_out\" | "
-            "sed -n 's/.*TX packets [0-9]* *bytes \\([0-9]*\\).*/\\1/p; "
-            "s/.*TX bytes:\\([0-9]*\\).*/\\1/p' | head -n 1); "
-            "if [ -z \"$wwan_rx\" ] || [ -z \"$wwan_tx\" ]; then "
-            "wwan_rx=$(cat /sys/class/net/wwan0/statistics/rx_bytes 2>/dev/null); "
-            "wwan_tx=$(cat /sys/class/net/wwan0/statistics/tx_bytes 2>/dev/null); "
-            "fi; "
-            "echo \"wwan_rx=${wwan_rx:-0}\"; "
-            "echo \"wwan_tx=${wwan_tx:-0}\"; "
-            "else echo \"wwan_rx=\"; echo \"wwan_tx=\"; fi; "
-            "uptime_s=$(cut -d' ' -f1 /proc/uptime 2>/dev/null); "
-            "echo \"uptime_s=${uptime_s:-}\"; '"
+            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0'"
         )
         _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
         output = stdout.read().decode("utf-8", errors="replace")
@@ -787,7 +626,7 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err, publish=False)
+                self._handle_ssh_failure(err)
                 if self._system_backoff_s <= 0.0:
                     self._system_backoff_s = max(3.0, SYSTEM_STATS_CHECK_S)
                 else:
@@ -808,155 +647,10 @@ class OnicsController:
                 except Exception:
                     pass
 
-        stats = self._apply_wwan_meter(stats)
-
         with self._lock:
             self._autopilot.system = stats
         self._system_backoff_s = 0.0
         self._system_backoff_until = 0.0
-
-    def _apply_wwan_meter(self, stats: Dict[str, Any]) -> Dict[str, Any]:
-        active_iface = stats.get("network_active_interface")
-        rx_bytes = stats.get("wwan_rx_bytes")
-        tx_bytes = stats.get("wwan_tx_bytes")
-        uptime_s = stats.get("uptime_s")
-
-        has_sample = isinstance(rx_bytes, int) and isinstance(tx_bytes, int)
-        total_bytes = rx_bytes + tx_bytes if has_sample else 0
-
-        if isinstance(uptime_s, (int, float)) and uptime_s > 0:
-            avg_rate = total_bytes / float(uptime_s)
-        else:
-            avg_rate = 0.0
-
-        if has_sample and active_iface == "wwan0":
-            rate_bps = avg_rate
-        else:
-            rate_bps = 0.0
-
-        if has_sample:
-            self._wwan_meter["rx"] = rx_bytes
-            self._wwan_meter["tx"] = tx_bytes
-            self._wwan_meter["total"] = total_bytes
-        else:
-            self._wwan_meter["rx"] = 0
-            self._wwan_meter["tx"] = 0
-            self._wwan_meter["total"] = 0
-        self._wwan_meter["rate_bps"] = rate_bps
-
-        stats["wwan_metered_rx_bytes"] = self._wwan_meter["rx"]
-        stats["wwan_metered_tx_bytes"] = self._wwan_meter["tx"]
-        stats["wwan_metered_total_bytes"] = self._wwan_meter["total"]
-        stats["wwan_metered_rate_bps"] = self._wwan_meter["rate_bps"]
-        stats["wwan_metered_avg_bps"] = avg_rate
-        stats["wwan_rx_bytes"] = rx_bytes
-        stats["wwan_tx_bytes"] = tx_bytes
-        return stats
-
-    @staticmethod
-    def _blank_mavlink_status(detail: str = "Awaiting MAVLink.") -> Dict[str, Any]:
-        return {
-            "status": "UNKNOWN",
-            "detail": detail,
-            "arming": None,
-            "last_heartbeat_iso": None,
-        }
-
-    @staticmethod
-    def _parse_mavlink_status_output(output: str) -> Dict[str, Any]:
-        cleaned = output.strip().splitlines()
-        if not cleaned:
-            return {"ok": False, "error": "Empty MAVLink response."}
-        payload = cleaned[-1]
-        try:
-            return json.loads(payload)
-        except json.JSONDecodeError:
-            return {"ok": False, "error": f"Invalid MAVLink JSON: {payload.strip()}"}
-
-    def _fetch_remote_mavlink_status(self, client: paramiko.SSHClient) -> Dict[str, Any]:
-        script = textwrap.dedent(
-            f"""
-            python3 - <<'PY'
-            import json
-            from pymavlink import mavutil
-
-            endpoint = {MAVLINK_ENDPOINT!r}
-            timeout = {MAVLINK_STATUS_TIMEOUT_S!r}
-            result = {{"ok": False, "error": "No heartbeat"}}
-            try:
-                mav = mavutil.mavlink_connection(endpoint, input=False, autoreconnect=False, timeout=timeout)
-                hb = mav.recv_match(type="HEARTBEAT", blocking=True, timeout=timeout)
-                if hb is None:
-                    result = {{"ok": False, "error": "No heartbeat"}}
-                else:
-                    armed = bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
-                    result = {{"ok": True, "arming": armed}}
-            except Exception as exc:
-                result = {{"ok": False, "error": "{{}}: {{}}".format(type(exc).__name__, exc)}}
-            print(json.dumps(result))
-            PY
-            """
-        ).strip()
-        cmd = f"bash -lc {shlex.quote(script)}"
-        _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False, timeout=MAVLINK_STATUS_TIMEOUT_S)
-        output = stdout.read().decode("utf-8", errors="replace")
-        err = stderr.read().decode("utf-8", errors="replace")
-        _ = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
-        payload = self._parse_mavlink_status_output(output)
-        if err and not payload.get("ok"):
-            payload["error"] = f"{payload.get('error', 'MAVLink error')} ({err.strip()})"
-        return payload
-
-    def _mavlink_status_check(self) -> None:
-        now_m = monotonic_s()
-        if now_m < self._mavlink_backoff_until:
-            return
-
-        client: Optional[paramiko.SSHClient]
-        created = False
-        with self._lock:
-            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
-
-        if client is None:
-            client, err, _ms = self._ssh_connect()
-            if client is None:
-                self._mark_failure()
-                self._handle_ssh_failure(err)
-                if self._mavlink_backoff_s <= 0.0:
-                    self._mavlink_backoff_s = max(3.0, MAVLINK_STATUS_CHECK_S)
-                else:
-                    self._mavlink_backoff_s = min(self._mavlink_backoff_s * 2.0, 60.0)
-                self._mavlink_backoff_until = monotonic_s() + self._mavlink_backoff_s
-                with self._lock:
-                    self._autopilot.mavlink = self._blank_mavlink_status(f"SSH error: {err}")
-                return
-            created = True
-
-        status = self._blank_mavlink_status()
-        try:
-            payload = self._fetch_remote_mavlink_status(client)
-            if payload.get("ok"):
-                status["status"] = "OK"
-                status["arming"] = payload.get("arming")
-                status["last_heartbeat_iso"] = wall_time_iso()
-                status["detail"] = "Heartbeat received."
-            else:
-                status["status"] = "ERROR"
-                status["detail"] = payload.get("error", "MAVLink error.")
-        except Exception as exc:
-            status["status"] = "ERROR"
-            status["detail"] = f"{type(exc).__name__}: {exc}"
-        finally:
-            if created and client is not None:
-                try:
-                    client.close()
-                except Exception:
-                    pass
-
-        with self._lock:
-            self._autopilot.mavlink = status
-        self._mavlink_backoff_s = 0.0
-        self._mavlink_backoff_until = 0.0
 
     @staticmethod
     def _parse_lte_signal_output(output: str) -> Tuple[Optional[float], Optional[float]]:
@@ -996,7 +690,7 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err, publish=False)
+                self._handle_ssh_failure(err)
                 stats["lte_signal_error"] = f"SSH error: {err}"
                 self._lte_signal_cache = stats
                 return dict(stats)
@@ -1305,10 +999,6 @@ class OnicsController:
             self._last_system_check = now_m
             self._system_stats_check()
 
-        if (now_m - self._last_mavlink_check) >= MAVLINK_STATUS_CHECK_S:
-            self._last_mavlink_check = now_m
-            self._mavlink_status_check()
-
         # Compute stale/LOS and stability score.
         with self._lock:
             hl = self._health
@@ -1352,8 +1042,6 @@ class OnicsController:
     # --- SSH operations
 
     def _ssh_connect(self) -> Tuple[Optional[paramiko.SSHClient], str, int]:
-        if DRY_RUN:
-            return None, "Dry run mode enabled; skipping SSH connection.", 0
         hostname, username, port, identity_files, proxycommand = self._resolve_ssh_settings()
         start = time.time()
 
@@ -1529,125 +1217,6 @@ class OnicsController:
         self._append_log(f"SERVICE RESTART {outcome}: {unit}{log_detail}")
         self._services_check()
         return ok, detail or ("Restarted" if ok else "Restart failed")
-
-    def stop_service(self, service_key: str) -> Tuple[bool, str]:
-        with self._lock:
-            service = self._autopilot.services.get(service_key)
-            unit = service.get("unit") if service else ""
-
-        if not unit:
-            return False, f"Unknown service '{service_key}'"
-
-        client: Optional[paramiko.SSHClient]
-        created = False
-        with self._lock:
-            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
-
-        if client is None:
-            client, err, _ms = self._ssh_connect()
-            if client is None:
-                self._mark_failure()
-                self._handle_ssh_failure(err)
-                return False, f"SSH error: {err}"
-            created = True
-
-        ok = False
-        detail = ""
-        try:
-            commands = [
-                f"sudo -n systemctl stop {shlex.quote(unit)}",
-                f"systemctl stop {shlex.quote(unit)}",
-            ]
-            for cmd in commands:
-                _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
-                out = stdout.read().decode("utf-8", errors="replace")
-                err = stderr.read().decode("utf-8", errors="replace")
-                exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
-                detail = (err or out or "").strip()
-                if exit_status == 0:
-                    ok = True
-                    break
-        except Exception as e:
-            detail = f"{type(e).__name__}: {e}"
-            ok = False
-        finally:
-            if created and client is not None:
-                try:
-                    client.close()
-                except Exception:
-                    pass
-
-        outcome = "OK" if ok else "FAILED"
-        log_detail = f" ({detail})" if detail else ""
-        self._append_log(f"SERVICE STOP {outcome}: {unit}{log_detail}")
-        self._services_check()
-        return ok, detail or ("Stopped" if ok else "Stop failed")
-
-    def send_mavlink_command(self, command: str) -> Tuple[bool, str, str]:
-        cleaned = command.strip()
-        if not cleaned:
-            return False, "Command is empty.", ""
-        if len(cleaned) > MAVLINK_COMMAND_MAX_LEN:
-            return False, f"Command exceeds {MAVLINK_COMMAND_MAX_LEN} characters.", ""
-        if "\n" in cleaned or "\r" in cleaned:
-            return False, "Command must be a single line.", ""
-
-        with self._lock:
-            if not (self._health.tailscale_ok and self._health.dns_ok and self._health.tcp_ok):
-                return False, "Tailnet/SSH health is not OK; refusing command", ""
-
-        client: Optional[paramiko.SSHClient]
-        created = False
-        with self._lock:
-            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
-
-        if client is None:
-            client, err, _ms = self._ssh_connect()
-            if client is None:
-                self._mark_failure()
-                self._handle_ssh_failure(err)
-                return False, f"SSH error: {err}", ""
-            created = True
-
-        ok = False
-        detail = ""
-        output = ""
-        try:
-            cmd_parts = shlex.split(MAVPROXY_CMD) if MAVPROXY_CMD else ["mavproxy.py"]
-            base_cmd = " ".join(shlex.quote(part) for part in cmd_parts)
-            cmd = (
-                f"{base_cmd} --master={shlex.quote(MAVLINK_ENDPOINT)} "
-                f"--cmd {shlex.quote(cleaned)} --cmd {shlex.quote('exit')}"
-            )
-            _stdin, stdout, stderr = client.exec_command(
-                cmd,
-                get_pty=False,
-                timeout=MAVLINK_COMMAND_TIMEOUT_S,
-            )
-            stdout_text = stdout.read().decode("utf-8", errors="replace")
-            stderr_text = stderr.read().decode("utf-8", errors="replace")
-            exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
-            output = (stdout_text + ("\n" + stderr_text if stderr_text else "")).strip()
-            detail = output or ""
-            ok = exit_status == 0
-        except Exception as exc:
-            detail = f"{type(exc).__name__}: {exc}"
-            ok = False
-        finally:
-            if created and client is not None:
-                try:
-                    client.close()
-                except Exception:
-                    pass
-
-        if len(detail) > 1200:
-            detail = detail[:1200].rstrip() + "…"
-        output = detail
-        outcome = "OK" if ok else "FAILED"
-        self._append_log(f"MAVLINK CMD {outcome}: {cleaned}")
-        if detail:
-            self._append_log(f"MAVLINK OUTPUT: {detail}")
-        return ok, detail or ("Command sent" if ok else "Command failed"), output
 
     def reboot_vehicle(self) -> Tuple[bool, str]:
         with self._lock:
@@ -2033,27 +1602,10 @@ def api_service_restart(service_key: str) -> Response:
     return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
 
 
-@app.post("/api/services/<service_key>/stop")
-def api_service_stop(service_key: str) -> Response:
-    ok, msg = controller.stop_service(service_key)
-    return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
-
-
 @app.post("/api/reboot")
 def api_reboot() -> Response:
     ok, msg = controller.reboot_vehicle()
     return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
-
-
-@app.post("/api/mavlink")
-def api_mavlink() -> Response:
-    payload = request.get_json(silent=True) or {}
-    command = str(payload.get("command", "")).strip()
-    ok, msg, output = controller.send_mavlink_command(command)
-    return (
-        jsonify({"ok": ok, "msg": msg, "output": output, "snapshot": controller.snapshot()}),
-        (200 if ok else 409),
-    )
 
 
 @app.get("/stream")
