@@ -43,7 +43,6 @@ const mavproxyMeta = document.getElementById("mavproxy-meta");
 const uplinkStatus = document.getElementById("uplink-status");
 const uplinkMeta = document.getElementById("uplink-meta");
 const uplinkSignalValue = document.getElementById("uplink-signal-value");
-const uplinkSignalMeta = document.getElementById("uplink-signal-meta");
 const systemLoad = document.getElementById("system-load");
 const systemLoadMeta = document.getElementById("system-load-meta");
 const systemLoadGraph = document.getElementById("system-load-graph");
@@ -833,13 +832,6 @@ function updateSnapshot(snapshot, options = {}) {
       } else {
         uplinkSignalValue.textContent = "n/a";
       }
-    }
-    if (uplinkSignalMeta) {
-      uplinkSignalMeta.textContent = Number.isFinite(system.lte_signal_percent)
-        ? Number.isFinite(system.lte_rssi_dbm)
-          ? `RSSI ${system.lte_rssi_dbm} dBm`
-          : "RSSI unavailable."
-        : system.lte_signal_error || "LTE signal unavailable.";
     }
     if (headerLoad) {
       headerLoad.textContent =
