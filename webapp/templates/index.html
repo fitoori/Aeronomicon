@@ -188,7 +188,7 @@
           </header>
           <div class="panel__body">
             <div class="health-grid">
-              <div class="health-card" id="arducopter-card">
+              <div class="health-card health-card--clickable" id="arducopter-card" data-service-log="arducopter" role="button" tabindex="0" aria-label="Show Arducopter logs">
                 <div class="health-card__header">
                   <h3>Arducopter</h3>
                   <button class="btn btn--service" data-service-restart="arducopter">Restart</button>
@@ -196,7 +196,7 @@
                 <p class="health-card__value" id="arducopter-status">UNKNOWN</p>
                 <p class="health-card__meta" id="arducopter-meta">Awaiting status.</p>
               </div>
-              <div class="health-card" id="mavproxy-card">
+              <div class="health-card health-card--clickable" id="mavproxy-card" data-service-log="mavproxy" role="button" tabindex="0" aria-label="Show MAVProxy logs">
                 <div class="health-card__header">
                   <h3>MAVProxy</h3>
                   <button class="btn btn--service" data-service-restart="mavproxy">Restart</button>
@@ -204,7 +204,7 @@
                 <p class="health-card__value" id="mavproxy-status">UNKNOWN</p>
                 <p class="health-card__meta" id="mavproxy-meta">Awaiting status.</p>
               </div>
-              <div class="health-card" id="uplink-card">
+              <div class="health-card health-card--clickable" id="uplink-card" data-service-log="uplink" role="button" tabindex="0" aria-label="Show Uplink logs">
                 <div class="health-card__header">
                   <h3>Uplink</h3>
                   <div class="health-card__header-actions">

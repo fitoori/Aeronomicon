@@ -1218,6 +1218,59 @@ class OnicsController:
         self._services_check()
         return ok, detail or ("Restarted" if ok else "Restart failed")
 
+    def service_logs(self, service_key: str, *, limit: int = 120) -> Tuple[bool, str, List[str]]:
+        with self._lock:
+            service = self._autopilot.services.get(service_key)
+            unit = service.get("unit") if service else ""
+
+        if not unit:
+            return False, f"Unknown service '{service_key}'", []
+
+        client: Optional[paramiko.SSHClient]
+        created = False
+        with self._lock:
+            client = self._ssh if self._ssh_transport and self._ssh_transport.is_active() else None
+
+        if client is None:
+            client, err, _ms = self._ssh_connect()
+            if client is None:
+                self._mark_failure()
+                self._handle_ssh_failure(err)
+                return False, f"SSH error: {err}", []
+            created = True
+
+        ok = False
+        detail = ""
+        lines: List[str] = []
+        try:
+            safe_limit = max(1, min(int(limit), 500))
+            unit_arg = shlex.quote(unit)
+            commands = [
+                f"sudo -n journalctl -u {unit_arg} --no-pager -n {safe_limit} --output=short-iso",
+                f"journalctl -u {unit_arg} --no-pager -n {safe_limit} --output=short-iso",
+            ]
+            for cmd in commands:
+                _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
+                out = stdout.read().decode("utf-8", errors="replace")
+                err = stderr.read().decode("utf-8", errors="replace")
+                exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+                detail = (err or "").strip()
+                if exit_status == 0:
+                    lines = [line for line in out.splitlines() if line.strip()]
+                    ok = True
+                    break
+        except Exception as e:
+            detail = f"{type(e).__name__}: {e}"
+            ok = False
+        finally:
+            if created and client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+
+        return ok, detail or ("Logs fetched" if ok else "Log fetch failed"), lines
+
     def reboot_vehicle(self) -> Tuple[bool, str]:
         with self._lock:
             if not (self._health.tailscale_ok and self._health.dns_ok and self._health.tcp_ok):
@@ -1600,6 +1653,12 @@ def api_clear() -> Response:
 def api_service_restart(service_key: str) -> Response:
     ok, msg = controller.restart_service(service_key)
     return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
+
+
+@app.get("/api/services/<service_key>/logs")
+def api_service_logs(service_key: str) -> Response:
+    ok, msg, lines = controller.service_logs(service_key)
+    return jsonify({"ok": ok, "msg": msg, "lines": lines}), (200 if ok else 409)
 
 
 @app.post("/api/reboot")
