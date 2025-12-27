@@ -121,7 +121,7 @@ MAVLINK_STATUS_CHECK_S = float(os.environ.get("MAVLINK_STATUS_CHECK_S", "4.0"))
 MAVLINK_STATUS_TIMEOUT_S = float(os.environ.get("MAVLINK_STATUS_TIMEOUT_S", "3.0"))
 MAVLINK_COMMAND_TIMEOUT_S = float(os.environ.get("MAVLINK_COMMAND_TIMEOUT_S", "8.0"))
 MAVLINK_COMMAND_MAX_LEN = int(os.environ.get("MAVLINK_COMMAND_MAX_LEN", "120"))
-MAVPROXY_CMD = os.environ.get("WATNE_MAVPROXY_CMD", "mavproxy.py").strip()
+MAVPROXY_CMD = os.environ.get("WATNE_MAVPROXY_CMD", "/home/pi/.local/bin/mavproxy.py").strip()
 
 # "Staleness" thresholds (seconds)
 REMOTE_HEALTH_STALE_S = float(os.environ.get("REMOTE_HEALTH_STALE_S", "6.0"))
