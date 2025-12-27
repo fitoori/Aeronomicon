@@ -392,10 +392,13 @@ class OnicsController:
         lowered = err.lower()
         return "no identities found" in lowered
 
-    def _set_login_prompt(self, required: bool, message: str = "") -> None:
+    def _set_login_prompt_state(self, required: bool, message: str = "") -> None:
         with self._lock:
             self._runtime.login_required = required
             self._runtime.login_message = message if required else ""
+
+    def _set_login_prompt(self, required: bool, message: str = "") -> None:
+        self._set_login_prompt_state(required, message)
         self._broker.publish("state", self.snapshot())
 
     def _resolve_ssh_settings(
@@ -426,7 +429,7 @@ class OnicsController:
 
         return hostname, username, port, identity_files, proxycommand
 
-    def _handle_ssh_failure(self, err: str) -> None:
+    def _handle_ssh_failure(self, err: str, *, publish_state: bool = True) -> None:
         if self._needs_login_prompt(err):
             hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
             msg = (
@@ -441,10 +444,16 @@ class OnicsController:
                     f"then run `ssh-copy-id -p {port} {username}@{hostname}` and "
                     f"`ssh -p {port} {username}@{hostname}` to continue."
                 )
-            self._set_login_prompt(True, msg)
+            if publish_state:
+                self._set_login_prompt(True, msg)
+            else:
+                self._set_login_prompt_state(True, msg)
             self._append_log("SSH AUTH REQUIRED: interactive login needed to continue.")
         else:
-            self._set_login_prompt(False, "")
+            if publish_state:
+                self._set_login_prompt(False, "")
+            else:
+                self._set_login_prompt_state(False, "")
 
     def snapshot(self, *, include_logs: bool = True) -> Dict[str, Any]:
         hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
@@ -690,7 +699,7 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err)
+                self._handle_ssh_failure(err, publish_state=False)
                 stats["lte_signal_error"] = f"SSH error: {err}"
                 self._lte_signal_cache = stats
                 return dict(stats)
