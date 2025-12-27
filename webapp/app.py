@@ -560,6 +560,7 @@ class OnicsController:
     @classmethod
     def _blank_system_stats(cls) -> Dict[str, Any]:
         return {
+            "telemetry_ok": False,
             "load_1": None,
             "load_5": None,
             "load_15": None,
@@ -588,6 +589,7 @@ class OnicsController:
         parts = output.split("\n---\n")
         if len(parts) < 4:
             return stats
+        stats["telemetry_ok"] = True
 
         load_line = parts[0].strip().splitlines()
         if load_line:
