@@ -69,8 +69,8 @@ body.is-dry-run.is-offline .shell {
 }
 
 .shell__logo-wrap {
-  width: 60px;
-  height: 60px;
+  width: 78px;
+  height: 78px;
   border-radius: 50%;
   overflow: hidden;
   display: grid;
@@ -984,8 +984,8 @@ body.is-rebooting .shell {
   }
 
   .shell__logo-wrap {
-    width: 52px;
-    height: 52px;
+    width: 68px;
+    height: 68px;
   }
 
   .shell__header {
