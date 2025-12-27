@@ -201,8 +201,12 @@ def _drop_privileges(uid: int, gid: int, home: str, user: str) -> None:
     os.environ["USER"] = user
     try:
         os.initgroups(user, gid)
-    except OSError:
-        pass
+    except OSError as exc:
+        sys.stderr.write(
+            "WARNING: initgroups failed; clearing supplemental groups to avoid "
+            f"retaining elevated access: {exc}\n"
+        )
+        os.setgroups([gid])
     os.setgid(gid)
     os.setuid(uid)
     global SSH_CONFIG_PATH
