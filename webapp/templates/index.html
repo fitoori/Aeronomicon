@@ -98,10 +98,10 @@
               <div class="load-graph load-graph--header" aria-hidden="true">
                 <canvas id="header-load-graph" role="img" aria-label="System load history"></canvas>
               </div>
-              <p class="health-card__value" id="header-load">DRY</p>
+              <p class="health-card__value" id="header-load">—</p>
             </div>
             <div class="health-card shell__stat-card" id="header-data-card">
-              <p class="health-card__value" id="header-data">DRY</p>
+              <p class="health-card__value" id="header-data">—</p>
               <p class="health-card__meta">Data avg 1m</p>
             </div>
             <div class="health-card shell__stat-card shell__stat-card--action">
@@ -110,12 +110,10 @@
           </div>
         </div>
         <div class="shell__status-group">
-          <div class="shell__status" id="connection-pill">LINK: DRY</div>
-          <div class="shell__substatus shell__substatus--unknown" id="arming-status">ARMING: DRY</div>
           <div class="shell__status" id="connection-pill">LINK: INIT</div>
           <div class="shell__status shell__status--unknown" id="arming-status">ARMING: UNKNOWN</div>
           <div class="shell__substatus shell__substatus--meta" id="arming-meta">
-            MAVLink: DRY
+            MAVLink: awaiting heartbeat.
           </div>
         </div>
       </header>
@@ -126,9 +124,9 @@
           <div class="toolbar__items">
             <div class="health-card" id="tracking-card">
               <h3>Tracking Confidence</h3>
-              <p class="health-card__value" id="tracking-confidence">DRY</p>
+              <p class="health-card__value" id="tracking-confidence">—</p>
               <p class="health-card__meta compact-hide" id="tracking-meta">
-                Tracking updates: DRY.
+                Tracking updates: awaiting telemetry.
               </p>
             </div>
             <div class="health-card" id="startup-card">
@@ -136,16 +134,16 @@
                 <h3>Startup Stage</h3>
                 <p class="startup-fails__value" id="startup-fails">0</p>
               </div>
-              <p class="health-card__value" id="startup-stage">DRY</p>
+              <p class="health-card__value" id="startup-stage">—</p>
               <p class="health-card__meta compact-hide" id="startup-meta">
-                Startup milestones: DRY.
+                Startup milestones: awaiting telemetry.
               </p>
             </div>
             <div class="health-card" id="autopilot-card">
               <h3>Autopilot Alerts</h3>
-              <p class="health-card__value" id="autopilot-alert">DRY</p>
+              <p class="health-card__value" id="autopilot-alert">—</p>
               <p class="health-card__meta compact-hide" id="autopilot-meta">
-                Autopilot alerts: DRY.
+                Autopilot alerts: awaiting telemetry.
               </p>
             </div>
           </div>
@@ -187,8 +185,6 @@
               <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
             </div>
           </header>
-          <div class="panel__body panel__body--logs">
-            <div class="log-view" id="log-view" role="log" aria-live="polite">DRY</div>
           <div class="panel__body panel__body--tabs">
             <div
               class="tab-panel is-active"
@@ -197,7 +193,9 @@
               aria-labelledby="telemetry-log-tab"
               data-telemetry-panel="telemetry-log"
             >
-              <div class="log-view" id="log-view" role="log" aria-live="polite"></div>
+              <div class="log-view" id="log-view" role="log" aria-live="polite">
+                Awaiting telemetry feed…
+              </div>
             </div>
             <div
               class="tab-panel"
@@ -223,9 +221,7 @@
                 </div>
                 <p class="mavlink-form__hint">Examples: status · arm throttle · disarm</p>
               </form>
-              <div class="mavlink-output" id="mavlink-output" aria-live="polite">
-                Awaiting command.
-              </div>
+              <div class="mavlink-output" id="mavlink-output" aria-live="polite">Awaiting command.</div>
             </div>
           </div>
         </article>
@@ -240,28 +236,28 @@
             <div class="health-card" id="tailscale-card">
               <div class="health-card__header">
                 <h3>Tailscale</h3>
-                <p class="health-card__badge" id="tailscale-backend">Backend: DRY</p>
+                <p class="health-card__badge" id="tailscale-backend">Backend: —</p>
               </div>
-              <p class="health-card__value" id="tailscale-status">DRY</p>
+              <p class="health-card__value" id="tailscale-status">—</p>
               <p class="health-card__meta compact-hide" id="tailscale-meta">
-                Tailscale status: DRY.
+                Tailscale status: awaiting telemetry.
               </p>
               <p
                 class="health-card__meta health-card__meta--muted compact-hide"
                 id="tailscale-error"
               >
-                Errors: DRY.
+                Errors: awaiting telemetry.
               </p>
             </div>
             <div class="health-card" id="dns-card">
               <h3>MagicDNS</h3>
-              <p class="health-card__value" id="dns-status">DRY</p>
-              <p class="health-card__meta compact-hide" id="dns-meta">DNS: DRY.</p>
+              <p class="health-card__value" id="dns-status">—</p>
+              <p class="health-card__meta compact-hide" id="dns-meta">DNS: awaiting telemetry.</p>
             </div>
             <div class="health-card" id="tcp-card">
               <h3>SSH Probe</h3>
-              <p class="health-card__value" id="tcp-status">DRY</p>
-              <p class="health-card__meta compact-hide" id="tcp-meta">TCP: DRY.</p>
+              <p class="health-card__value" id="tcp-status">—</p>
+              <p class="health-card__meta compact-hide" id="tcp-meta">TCP: awaiting telemetry.</p>
             </div>
           </div>
         </article>
@@ -284,8 +280,8 @@
                     </div>
                   </div>
                 </div>
-                <p class="health-card__value" id="arducopter-status">DRY</p>
-                <p class="health-card__meta" id="arducopter-meta">Status: DRY.</p>
+                <p class="health-card__value" id="arducopter-status">—</p>
+                <p class="health-card__meta" id="arducopter-meta">Status: awaiting telemetry.</p>
               </div>
               <div class="health-card" id="mavproxy-card">
                 <div class="health-card__header">
@@ -299,19 +295,14 @@
                     </div>
                   </div>
                 </div>
-                <p class="health-card__value" id="mavproxy-status">DRY</p>
-                <p class="health-card__meta" id="mavproxy-meta">Status: DRY.</p>
+                <p class="health-card__value" id="mavproxy-status">—</p>
+                <p class="health-card__meta" id="mavproxy-meta">Status: awaiting telemetry.</p>
               </div>
               <div class="health-card" id="uplink-card">
                 <div class="health-card__header">
                   <h3>Uplink</h3>
                   <div class="health-card__header-actions">
-                    <p class="health-card__signal-value" id="uplink-signal-value">DRY</p>
-                    <button class="btn btn--service btn--service-stop" data-service-stop="uplink">
-                      Stop
-                    </button>
-                    <button class="btn btn--service" data-service-restart="uplink">Restart</button>
-                    <p class="health-card__signal-value" id="uplink-signal-value">n/a</p>
+                    <p class="health-card__signal-value" id="uplink-signal-value">—</p>
                     <div class="health-card__action-stack">
                       <button class="btn btn--service btn--service-stop" data-service-stop="uplink">
                         Stop
@@ -320,37 +311,10 @@
                     </div>
                   </div>
                 </div>
-                <p class="health-card__value" id="uplink-status">DRY</p>
-                <p class="health-card__meta" id="uplink-signal-meta">Signal strength: DRY.</p>
-                <p class="health-card__meta" id="uplink-meta">Status: DRY.</p>
+                <p class="health-card__value" id="uplink-status">—</p>
+                <p class="health-card__meta" id="uplink-signal-meta">Signal strength: awaiting telemetry.</p>
+                <p class="health-card__meta" id="uplink-meta">Status: awaiting telemetry.</p>
               </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel" id="mavlink-panel">
-          <header class="panel__header">
-            <h2>MAVLink Console</h2>
-          </header>
-          <div class="panel__body">
-            <form class="mavlink-form" id="mavlink-form">
-              <label class="mavlink-form__label" for="mavlink-command">Command</label>
-              <div class="mavlink-form__row">
-                <input
-                  class="mavlink-form__input"
-                  id="mavlink-command"
-                  type="text"
-                  autocomplete="off"
-                  placeholder="status"
-                />
-                <button class="btn btn--service" id="mavlink-send-btn" type="submit">
-                  Send
-                </button>
-              </div>
-              <p class="mavlink-form__hint">Examples: status · arm throttle · disarm</p>
-            </form>
-            <div class="mavlink-output" id="mavlink-output" aria-live="polite">
-              Command output: DRY.
             </div>
           </div>
         </article>
@@ -370,9 +334,9 @@
                     role="img"
                   ></canvas>
                 </div>
-                <p class="health-card__value" id="system-load">DRY</p>
+                <p class="health-card__value" id="system-load">—</p>
                 <p class="health-card__meta compact-hide" id="system-load-meta">
-                  CPU cores: DRY.
+                  CPU cores: awaiting telemetry.
                 </p>
               </div>
               <div class="health-card load-card" id="system-memory-card">
@@ -384,27 +348,24 @@
                     role="img"
                   ></canvas>
                 </div>
-                <p class="health-card__value" id="system-memory">DRY</p>
+                <p class="health-card__value" id="system-memory">—</p>
                 <p class="health-card__meta compact-hide" id="system-memory-meta">
-                  Memory telemetry: DRY.
+                  Memory telemetry: awaiting telemetry.
                 </p>
               </div>
               <div class="health-card" id="system-disk-card">
                 <h3>Disk</h3>
-                <p class="health-card__value" id="system-disk">DRY</p>
-              <p class="health-card__meta compact-hide" id="system-disk-meta">
-                Disk telemetry: DRY.
-              </p>
+                <p class="health-card__value" id="system-disk">—</p>
+                <p class="health-card__meta compact-hide" id="system-disk-meta">
+                  Disk telemetry: awaiting telemetry.
+                </p>
               </div>
               <div class="health-card" id="system-network-card">
                 <h3>Network</h3>
-                <p class="health-card__value" id="system-network">DRY</p>
-                <p class="health-card__meta" id="system-network-meta">Network telemetry: DRY.</p>
-              </div>
-              <div class="health-card" id="system-network-card">
-                <h3>Network</h3>
-                <p class="health-card__value" id="system-network">DRY</p>
-                <p class="health-card__meta" id="system-network-meta">Network telemetry: DRY.</p>
+                <p class="health-card__value" id="system-network">—</p>
+                <p class="health-card__meta" id="system-network-meta">
+                  Network telemetry: awaiting telemetry.
+                </p>
               </div>
             </div>
           </div>
