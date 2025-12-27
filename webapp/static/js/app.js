@@ -18,6 +18,7 @@ const loginKeygenCommand = document.getElementById("login-keygen-command");
 const loginOpenBtn = document.getElementById("login-open-btn");
 const loginDismissBtn = document.getElementById("login-dismiss-btn");
 const serviceRestartButtons = document.querySelectorAll("[data-service-restart]");
+const serviceLogCards = document.querySelectorAll("[data-service-log]");
 
 const tailscaleStatus = document.getElementById("tailscale-status");
 const tailscaleBackend = document.getElementById("tailscale-backend");
@@ -945,6 +946,15 @@ async function sendCommand(path) {
   return res.json();
 }
 
+async function fetchServiceLogs(service) {
+  const res = await fetch(`/api/services/${service}/logs`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.msg || "Log request failed");
+  }
+  return res.json();
+}
+
 engageToggleBtn?.addEventListener("click", async () => {
   if (!engageToggleAction) {
     return;
@@ -987,6 +997,40 @@ serviceRestartButtons.forEach((button) => {
       appendLog(`RESTART FAILED (${service}): ${err.message}`);
     } finally {
       button.disabled = false;
+    }
+  });
+});
+
+serviceLogCards.forEach((card) => {
+  const service = card.getAttribute("data-service-log");
+  if (!service) {
+    return;
+  }
+  const requestLogs = async () => {
+    card.setAttribute("aria-busy", "true");
+    try {
+      const data = await fetchServiceLogs(service);
+      const lines = Array.isArray(data.lines) ? data.lines : [];
+      appendLog(`SERVICE LOG (${service}): ${lines.length} lines`);
+      lines.forEach((line) => {
+        appendLog(`[${service}] ${line}`);
+      });
+    } catch (err) {
+      appendLog(`SERVICE LOG FAILED (${service}): ${err.message}`);
+    } finally {
+      card.removeAttribute("aria-busy");
+    }
+  };
+  card.addEventListener("click", (event) => {
+    if (event.target.closest(".btn--service")) {
+      return;
+    }
+    requestLogs();
+  });
+  card.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      requestLogs();
     }
   });
 });

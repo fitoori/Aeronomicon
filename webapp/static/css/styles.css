@@ -430,6 +430,15 @@ body.is-offline .shell {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.health-card--clickable {
+  cursor: pointer;
+}
+
+.health-card--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .load-card {
   position: relative;
   overflow: hidden;
