@@ -32,6 +32,7 @@ import dataclasses
 import getpass
 import json
 import os
+import pwd
 import queue
 import re
 import shutil
@@ -168,6 +169,48 @@ def load_ssh_config() -> Optional[paramiko.SSHConfig]:
     except Exception:
         return None
     return cfg
+
+
+def _resolve_drop_privileges() -> Optional[Tuple[int, int, str, str]]:
+    if os.geteuid() != 0:
+        return None
+    sudo_uid = os.environ.get("SUDO_UID")
+    sudo_gid = os.environ.get("SUDO_GID")
+    sudo_user = os.environ.get("SUDO_USER")
+    if not (sudo_uid and sudo_gid and sudo_user):
+        return None
+    try:
+        uid = int(sudo_uid)
+        gid = int(sudo_gid)
+    except ValueError:
+        return None
+    try:
+        info = pwd.getpwuid(uid)
+        user = info.pw_name
+        home = info.pw_dir
+    except KeyError:
+        user = sudo_user
+        home = os.path.expanduser(f"~{sudo_user}")
+    return uid, gid, home, user
+
+
+def _drop_privileges(uid: int, gid: int, home: str, user: str) -> None:
+    sys.stderr.write(f"INFO: Dropping privileges to {user} (uid={uid}, gid={gid}).\n")
+    os.environ["HOME"] = home
+    os.environ["LOGNAME"] = user
+    os.environ["USER"] = user
+    try:
+        os.initgroups(user, gid)
+    except OSError as exc:
+        sys.stderr.write(
+            "WARNING: initgroups failed; clearing supplemental groups to avoid "
+            f"retaining elevated access: {exc}\n"
+        )
+        os.setgroups([gid])
+    os.setgid(gid)
+    os.setuid(uid)
+    global SSH_CONFIG_PATH
+    SSH_CONFIG_PATH = os.path.expanduser(os.environ.get("WATNE_SSH_CONFIG", "~/.ssh/config"))
 
 
 def resolve_host(hostname: str) -> Tuple[bool, List[str], str]:
@@ -1750,19 +1793,36 @@ def main() -> int:
             "WARNING: tailscale binary not found. Tailnet connectivity checks will fail.\n"
         )
 
+    drop_target = _resolve_drop_privileges()
+
+    server: Optional[Any] = None
+    if drop_target and FLASK_PORT < 1024:
+        server = make_server(
+            FLASK_HOST,
+            FLASK_PORT,
+            app,
+            threaded=True,
+            request_handler=QuietWSGIRequestHandler,
+        )
+        _drop_privileges(*drop_target)
+    else:
+        if drop_target:
+            _drop_privileges(*drop_target)
+
     stop_evt = threading.Event()
 
     t = threading.Thread(target=_health_loop, args=(stop_evt,), name="health-loop", daemon=True)
     t.start()
 
     # Run Flask with a shutdown handle for clean SIGTERM/SIGINT exits.
-    server = make_server(
-        FLASK_HOST,
-        FLASK_PORT,
-        app,
-        threaded=True,
-        request_handler=QuietWSGIRequestHandler,
-    )
+    if server is None:
+        server = make_server(
+            FLASK_HOST,
+            FLASK_PORT,
+            app,
+            threaded=True,
+            request_handler=QuietWSGIRequestHandler,
+        )
     _install_signal_handlers(stop_evt, server.shutdown)
     try:
         server.serve_forever()
