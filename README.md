@@ -52,3 +52,4 @@ A collection of scripts and utilities to streamline working with Intel RealSense
 - Your Mileage May Vary.
 - Untested scripts may require tweaks or additional dependencies—use caution in production environments.
 - When modifying systemd units or shell scripts, keep backups of working configurations so you can quickly revert.
+- A lot of the hardware (and as a result software) is outdated/discontinued and therefore not worth pursuing going forward. If you're actually trying to build one of your own, please don't bother. Instead, reach out to me! 
