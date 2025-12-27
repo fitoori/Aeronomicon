@@ -668,8 +668,10 @@ class OnicsController:
                     active_iface = line.partition("=")[2].strip()
                     continue
                 fields = line.split("|")
-                if len(fields) < 5:
+                if len(fields) < 2:
                     continue
+                if len(fields) < 5:
+                    fields.extend([""] * (5 - len(fields)))
                 name, state, carrier, ipv4, ipv6 = fields[:5]
                 if name not in interfaces:
                     continue
