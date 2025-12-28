@@ -46,7 +46,7 @@ import threading
 import time
 import traceback
 from collections import deque
-from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple, TextIO
 
 # ---- Dependency preflight (fail fast, with actionable errors) -----------------
 
@@ -141,6 +141,46 @@ def monotonic_s() -> float:
 
 def wall_time_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
+
+
+_daemon_log_handle: Optional[TextIO] = None
+
+
+def _daemonize(log_path: Optional[str]) -> None:
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    try:
+        pid = os.fork()
+    except OSError as exc:
+        raise RuntimeError(f"Failed to fork for daemon mode: {exc}") from exc
+    if pid > 0:
+        os._exit(0)
+
+    os.setsid()
+    try:
+        pid = os.fork()
+    except OSError as exc:
+        raise RuntimeError(f"Failed to fork for daemon mode: {exc}") from exc
+    if pid > 0:
+        os._exit(0)
+
+    os.chdir("/")
+    os.umask(0)
+
+    with open("/dev/null", "rb", buffering=0) as devnull_in:
+        os.dup2(devnull_in.fileno(), sys.stdin.fileno())
+
+    if log_path:
+        log_handle = open(log_path, "a", buffering=1, encoding="utf-8")
+        os.dup2(log_handle.fileno(), sys.stdout.fileno())
+        os.dup2(log_handle.fileno(), sys.stderr.fileno())
+        global _daemon_log_handle
+        _daemon_log_handle = log_handle
+    else:
+        with open("/dev/null", "ab", buffering=0) as devnull_out:
+            os.dup2(devnull_out.fileno(), sys.stdout.fileno())
+            os.dup2(devnull_out.fileno(), sys.stderr.fileno())
 
 
 def safe_json_dumps(obj: Any) -> str:
@@ -1795,8 +1835,21 @@ def main() -> int:
         default=FLASK_PORT,
         help=f"Port to bind the web server (default: {FLASK_PORT}).",
     )
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Run in the background as a daemon.",
+    )
+    parser.add_argument(
+        "--daemon-log-file",
+        default=None,
+        help="Optional log file for daemon mode (default: discard output).",
+    )
     args = parser.parse_args()
     flask_port = args.port
+
+    if args.daemon:
+        _daemonize(args.daemon_log_file)
 
     # Detect tailscale presence early; do not hard-exit, but make it obvious.
     if not which_or_none("tailscale"):
