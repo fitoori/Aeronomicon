@@ -7,10 +7,38 @@ SIGNAL_SCRIPT="${SCRIPT_DIR}/lte-signal-strength.sh"
 SENSOR_SCRIPT="${SCRIPT_DIR}/sensor-readings.sh"
 DISCORD_SCRIPT="/home/pi/Aeronomicon/util/discord.py"
 DISCORD_WEBHOOK="https://discord.com/api/webhooks/1454669304749621282/8LQlnXje9YyXtImmy7eDvARFAg7tYKqf16vuLiJPkQHW4OFXzJLAPSje7vVAi43jHqop"
+DRY_RUN=false
 
 log() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$*"
 }
+
+usage() {
+    cat <<'EOF'
+Usage: arducopter-prestart.sh [--dry-run]
+
+Options:
+  --dry-run  Print the Discord message that would be sent, then exit.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            log "Unknown argument: $1"
+            usage
+            exit 2
+            ;;
+    esac
+done
 
 signal_percent="NaN"
 if [[ -x "$SIGNAL_SCRIPT" ]]; then
@@ -41,6 +69,12 @@ else
 fi
 
 message="insert data here"
+
+if [[ "$DRY_RUN" == "true" ]]; then
+    log "Dry run enabled; Discord message would be:"
+    printf '%s\n' "$message"
+    exit 0
+fi
 
 if [[ ! -x "$DISCORD_SCRIPT" ]]; then
     log "Discord script not executable at $DISCORD_SCRIPT; unable to send message."
