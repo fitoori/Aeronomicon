@@ -52,7 +52,14 @@ main() {
   require_root
 
   if [[ ${#hubs[@]} -eq 0 ]]; then
-    mapfile -t hubs < <(ls -1 /sys/bus/usb/devices/usb* 2>/dev/null | xargs -n1 basename)
+    for path in /sys/bus/usb/devices/usb*; do
+      [[ -e "$path" ]] || continue
+      local hub
+      hub="$(basename "$path")"
+      if [[ $hub =~ ^usb[0-9]+$ ]]; then
+        hubs+=("$hub")
+      fi
+    done
   fi
 
   if [[ ${#hubs[@]} -eq 0 ]]; then
