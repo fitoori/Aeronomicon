@@ -38,6 +38,7 @@ done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
+service_dir="${repo_root}/util/services"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "This script must be run as root." >&2
@@ -65,18 +66,7 @@ services=(
 ensure_executable_scripts
 
 for service in "${services[@]}"; do
-  case "${service}" in
-    mavproxy.service)
-      service_path="${repo_root}/${service}"
-      ;;
-    uplink.service)
-      service_path="${script_dir}/../${service}"
-      ;;
-    *)
-      echo "Unknown service: ${service}" >&2
-      exit 1
-      ;;
-  esac
+  service_path="${service_dir}/${service}"
   if [[ ! -f "${service_path}" ]]; then
     echo "Service file ${service} not found at ${service_path}." >&2
     exit 1
