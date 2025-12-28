@@ -91,6 +91,12 @@ def send_webhook(webhook_url: str, content: str) -> None:
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Discord webhook failed ({exc.code}): {body}") from exc
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        if response.status >= 300:
+            raise RuntimeError(f"Discord webhook failed ({response.status}).")
 
 
 def parse_args() -> argparse.Namespace:
