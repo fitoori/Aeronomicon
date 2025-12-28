@@ -28,6 +28,7 @@ Operational Model
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import getpass
 import json
@@ -1787,6 +1788,16 @@ def _install_signal_handlers(
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="ONICS-T Remote Console web server")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=FLASK_PORT,
+        help=f"Port to bind the web server (default: {FLASK_PORT}).",
+    )
+    args = parser.parse_args()
+    flask_port = args.port
+
     # Detect tailscale presence early; do not hard-exit, but make it obvious.
     if not which_or_none("tailscale"):
         sys.stderr.write(
@@ -1796,10 +1807,10 @@ def main() -> int:
     drop_target = _resolve_drop_privileges()
 
     server: Optional[Any] = None
-    if drop_target and FLASK_PORT < 1024:
+    if drop_target and flask_port < 1024:
         server = make_server(
             FLASK_HOST,
-            FLASK_PORT,
+            flask_port,
             app,
             threaded=True,
             request_handler=QuietWSGIRequestHandler,
@@ -1818,7 +1829,7 @@ def main() -> int:
     if server is None:
         server = make_server(
             FLASK_HOST,
-            FLASK_PORT,
+            flask_port,
             app,
             threaded=True,
             request_handler=QuietWSGIRequestHandler,
