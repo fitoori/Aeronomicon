@@ -24,6 +24,23 @@ update_repo() {
   git -C "${REPO_DIR}" pull --ff-only
 }
 
+prompt_service_replacement() {
+  local response
+  if [[ -t 0 ]]; then
+    read -r -p "Replace systemd service files with newer versions? [y/N] " response
+  else
+    response="n"
+  fi
+  case "${response}" in
+    [Yy]|[Yy][Ee][Ss])
+      run_installer_update
+      ;;
+    *)
+      log "Skipping service file replacement."
+      ;;
+  esac
+}
+
 run_installer_update() {
   local installer="${REPO_DIR}/legacy/install/install-services.sh"
   if [[ ! -x "${installer}" ]]; then
@@ -47,8 +64,8 @@ main() {
   require_command git
   require_command apt-get
   update_repo
-  run_installer_update
   update_system_packages
+  prompt_service_replacement
   log "Update routine completed."
 }
 
