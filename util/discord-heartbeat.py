@@ -20,11 +20,6 @@ import urllib.request
 from typing import Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DISCORD_WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/"
-    "1454669304749621282/"
-    "8LQlnXje9YyXtImmy7eDvARFAg7tYKqf16vuLiJPkQHW4OFXzJLAPSje7vVAi43jHqop"
-)
 LTE_SIGNAL_SCRIPT = os.environ.get(
     "LTE_SIGNAL_SCRIPT",
     os.path.join(SCRIPT_DIR, "lte-signal-strength.sh"),
@@ -93,7 +88,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--webhook-url",
-        default=os.environ.get("DISCORD_WEBHOOK_URL", DEFAULT_DISCORD_WEBHOOK_URL),
+        default=os.environ.get("DISCORD_WEBHOOK_URL"),
         help="Discord webhook URL (or set DISCORD_WEBHOOK_URL).",
     )
     return parser.parse_args()
