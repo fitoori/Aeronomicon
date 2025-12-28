@@ -5,17 +5,12 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SIGNAL_SCRIPT="${SCRIPT_DIR}/lte-signal-strength.sh"
 SENSOR_SCRIPT="${SCRIPT_DIR}/sensor-readings.sh"
-DISCORD_SCRIPT="${SCRIPT_DIR}/discord/discord.py"
-DISCORD_WEBHOOK="${DISCORD_WEBHOOK:-}"
+DISCORD_SCRIPT="/home/pi/Aeronomicon/util/discord.py"
+DISCORD_WEBHOOK="https://discord.com/api/webhooks/1454669304749621282/8LQlnXje9YyXtImmy7eDvARFAg7tYKqf16vuLiJPkQHW4OFXzJLAPSje7vVAi43jHqop"
 
 log() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$*"
 }
-
-if [[ -z "$DISCORD_WEBHOOK" ]]; then
-    log "DISCORD_WEBHOOK is not set; skipping Discord notification."
-    exit 0
-fi
 
 signal_percent="NaN"
 if [[ -x "$SIGNAL_SCRIPT" ]]; then
@@ -45,12 +40,12 @@ else
     log "Sensor script not executable at $SENSOR_SCRIPT; reporting unavailable sensor data."
 fi
 
-message="I'm alive! Signal Strength is ${signal_percent}% and my sensors report ${sensor_data}"
+message="insert data here"
 
 if [[ ! -x "$DISCORD_SCRIPT" ]]; then
     log "Discord script not executable at $DISCORD_SCRIPT; unable to send message."
     exit 1
 fi
 
-python3 "$DISCORD_SCRIPT" --webhook "$DISCORD_WEBHOOK" "$message"
+/usr/bin/python3 "$DISCORD_SCRIPT" --webhook "$DISCORD_WEBHOOK" "$message"
 log "Discord notification sent."
