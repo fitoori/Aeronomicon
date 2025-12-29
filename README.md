@@ -7,7 +7,7 @@ A collection of scripts and utilities to streamline working with Intel RealSense
 - **onics-t.py** - Re-rework of Thien94's `precland` script which used Intel's RealSense T265 Tracking Camera (discontinued) to achieve GPS-less precision loiter capabilities and AprilTag-based self-landing.
 - **apriltags3.py** – Upstream apriltags dependency preserved for compatibility and slightly enhanced/modernized.
 - **uplink.sh** – Bash script to manage an LTE uplink with self-recovery logic and a daily reboot at 01:00.
-- **mavproxy.service** – Systemd unit file for running MAVProxy as a managed service.
+- **util/services/mavproxy.service** – Systemd unit file for running MAVProxy as a managed service.
 
 ## Diagnostic Tools & Utilities
 
@@ -31,9 +31,9 @@ A collection of scripts and utilities to streamline working with Intel RealSense
 ## Webapp & Services
 
 - **webapp/** – Frontend assets for the local status/monitoring UI.
-- **webapp.service** – Systemd unit for the webapp.
-- **webapp-watchdog.service** – Systemd unit for the webapp watchdog.
-- **webapp-watchdog.timer** – Timer to run the watchdog on a schedule.
+- **util/services/webapp.service** – Systemd unit for the webapp.
+- **util/services/webapp-watchdog.service** – Systemd unit for the webapp watchdog.
+- **util/services/webapp-watchdog.timer** – Timer to run the watchdog on a schedule.
 
 ## Legacy Repository Contents
 

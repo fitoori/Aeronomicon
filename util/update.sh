@@ -12,7 +12,7 @@ require_command() {
   fi
 }
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUDO=()
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   SUDO=(sudo)
@@ -24,8 +24,25 @@ update_repo() {
   git -C "${REPO_DIR}" pull --ff-only
 }
 
+prompt_service_replacement() {
+  local response="n"
+  if [[ -r /dev/tty ]]; then
+    read -r -p "Replace systemd service files with newer versions? [y/N] " response </dev/tty || response="n"
+  elif [[ -t 0 ]]; then
+    read -r -p "Replace systemd service files with newer versions? [y/N] " response || response="n"
+  fi
+  case "${response}" in
+    [Yy]|[Yy][Ee][Ss])
+      run_installer_update
+      ;;
+    *)
+      log "Skipping service file replacement."
+      ;;
+  esac
+}
+
 run_installer_update() {
-  local installer="${REPO_DIR}/install/install-services.sh"
+  local installer="${REPO_DIR}/util/services/install-services.sh"
   if [[ ! -x "${installer}" ]]; then
     echo "Installer not found or not executable: ${installer}" >&2
     exit 1
@@ -47,8 +64,8 @@ main() {
   require_command git
   require_command apt-get
   update_repo
-  run_installer_update
   update_system_packages
+  prompt_service_replacement
   log "Update routine completed."
 }
 

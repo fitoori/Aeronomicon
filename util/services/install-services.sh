@@ -38,23 +38,26 @@ done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
-service_dir="${repo_root}/util/services"
+service_dir="${script_dir}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "This script must be run as root." >&2
   exit 1
 fi
 
-arming_lock_scripts=(uplink.sh ONICS2.py onlcs-lite.py)
+arming_lock_scripts=(
+  "${repo_root}/uplink.sh"
+  "${repo_root}/legacy/ONICS2.py"
+  "${repo_root}/legacy/onlcs-lite.py"
+)
 
 ensure_executable_scripts() {
   for script in "${arming_lock_scripts[@]}"; do
-    local path="${script_dir}/${script}"
-    if [[ ! -f "${path}" ]]; then
-      echo "Expected script not found: ${path}" >&2
+    if [[ ! -f "${script}" ]]; then
+      echo "Expected script not found: ${script}" >&2
       exit 1
     fi
-    chmod +x "${path}"
+    chmod +x "${script}"
   done
 }
 
