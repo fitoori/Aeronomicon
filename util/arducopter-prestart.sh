@@ -100,8 +100,39 @@ if [[ -x "$SENSOR_SCRIPT" ]]; then
                 fi
                 pressure_value=${pressure_value:-unknown}
                 temperature_value=${temperature_value:-unknown}
+                temperature_display="$temperature_value"
+                if [[ "$temperature_value" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+                    temperature_display="${temperature_value}℃"
+                fi
 
-                sensor_status="sensor readings: average accelerometer ${average_accel}, average gyroscope ${average_gyro}, average magnetometer ${average_mag}, pressure ${pressure_value} Pa, temperature ${temperature_value} C."
+                cpu_temp_value=""
+                if [[ -r /sys/class/thermal/thermal_zone0/temp ]]; then
+                    cpu_temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || true)
+                    if [[ "$cpu_temp_raw" =~ ^[0-9]+$ ]]; then
+                        cpu_temp_value=$(awk -v val="$cpu_temp_raw" 'BEGIN {printf "%.2f", val / 1000}')
+                    fi
+                fi
+                if [[ -z "$cpu_temp_value" ]] && command -v vcgencmd >/dev/null 2>&1; then
+                    cpu_temp_value=$(vcgencmd measure_temp 2>/dev/null | sed 's/temp=//; s/[^0-9.]*//g')
+                fi
+                if [[ -z "$cpu_temp_value" ]] && command -v sensors >/dev/null 2>&1; then
+                    cpu_temp_value=$(sensors 2>/dev/null | grep -m1 -Eo '[0-9]+\.[0-9]+' | head -n1)
+                fi
+                cpu_temp_value=${cpu_temp_value:-unknown}
+                cpu_temp_display="$cpu_temp_value"
+                if [[ "$cpu_temp_value" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+                    cpu_temp_display="${cpu_temp_value}℃"
+                fi
+
+                sensor_status=$(cat <<EOF
+sensor readings are available.
+Temperature ${temperature_display} (CPU ${cpu_temp_display} )
+Pressure ${pressure_value} Pa
+Accelerometer ${average_accel}
+Gyroscope ${average_gyro}
+Magnetometer ${average_mag}
+EOF
+)
             else
                 log "Sensor output missing expected fields; reporting unavailable sensor data."
             fi
