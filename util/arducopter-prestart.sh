@@ -16,7 +16,7 @@ is_ardupilot_running() {
     if pgrep -f "/usr/bin/arducopter" >/dev/null 2>&1; then
         return 0
     fi
-    if pgrep -f "arducopter" >/dev/null 2>&1; then
+    if pgrep -x "arducopter" >/dev/null 2>&1; then
         return 0
     fi
     if command -v systemctl >/dev/null 2>&1; then
