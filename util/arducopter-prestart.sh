@@ -116,7 +116,35 @@ if [[ -x "$SENSOR_SCRIPT" ]]; then
                     cpu_temp_value=$(vcgencmd measure_temp 2>/dev/null | sed 's/temp=//; s/[^0-9.]*//g')
                 fi
                 if [[ -z "$cpu_temp_value" ]] && command -v sensors >/dev/null 2>&1; then
-                    cpu_temp_value=$(sensors 2>/dev/null | grep -m1 -Eo '[0-9]+\.[0-9]+' | head -n1)
+                    cpu_temp_value=$(
+                        sensors 2>/dev/null | awk '
+                            BEGIN {IGNORECASE=1}
+                            /°C/ && /(Package id 0|Tctl|Tdie|CPU|Core 0|temp1)/ {
+                                for (i = 1; i <= NF; i++) {
+                                    if ($i ~ /[0-9]+\.[0-9]+°C/) {
+                                        gsub(/[^0-9.]/, "", $i)
+                                        print $i
+                                        exit
+                                    }
+                                }
+                            }
+                        '
+                    )
+                    if [[ -z "$cpu_temp_value" ]]; then
+                        cpu_temp_value=$(
+                            sensors 2>/dev/null | awk '
+                                /°C/ {
+                                    for (i = 1; i <= NF; i++) {
+                                        if ($i ~ /[0-9]+\.[0-9]+°C/) {
+                                            gsub(/[^0-9.]/, "", $i)
+                                            print $i
+                                            exit
+                                        }
+                                    }
+                                }
+                            '
+                        )
+                    fi
                 fi
                 cpu_temp_value=${cpu_temp_value:-unknown}
                 cpu_temp_display="$cpu_temp_value"
