@@ -1,7 +1,7 @@
 [Unit]
 Description=ArduPilot for Linux
 After=systemd-modules-load.service
-Documentation=https://docs.emlid.com/navio2/navio-ardupilot/installation-and-running/#autostarti$
+Documentation=https://docs.emlid.com/navio2/navio-ardupilot/installation-and-running/#autostarting-at-boot
 Conflicts=ardupilot.service arduplane.service ardurover.service ardusub.service
 
 [Service]

@@ -62,6 +62,7 @@ ensure_executable_scripts() {
 }
 
 services=(
+  arducopter.service
   mavproxy.service
   uplink.service
 )
