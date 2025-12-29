@@ -57,9 +57,22 @@ const headerMemory = document.getElementById("header-memory");
 const headerMemoryGraph = document.getElementById("header-memory-graph");
 const headerDisk = document.getElementById("header-disk");
 
+const urlParams = new URLSearchParams(window.location.search);
+const dryRunParam = (urlParams.get("dry_run") || "").toLowerCase();
+const isDryRun =
+  document.body?.dataset.dryRun === "true" ||
+  ["1", "true", "yes", "on"].includes(dryRunParam);
+
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
+
+function dismissLoadingScreen() {
+  if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
+    loadingScreen.classList.add("hidden");
+    setTimeout(() => loadingScreen.remove(), 600);
+  }
+}
 
 function setLogoMenuOpen(open) {
   if (!logoMenuButton || !logoMenu) {
@@ -95,6 +108,13 @@ const cards = {
 };
 
 function setOfflineState(isOffline) {
+  if (isDryRun) {
+    document.body.classList.remove("is-offline");
+    if (offlineScreen) {
+      offlineScreen.setAttribute("aria-hidden", "true");
+    }
+    return;
+  }
   document.body.classList.toggle("is-offline", isOffline);
   if (offlineScreen) {
     offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
@@ -687,10 +707,7 @@ function updateSnapshot(snapshot, options = {}) {
     setOfflineState(false);
   }
 
-  if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
-    loadingScreen.classList.add("hidden");
-    setTimeout(() => loadingScreen.remove(), 600);
-  }
+  dismissLoadingScreen();
 
   const { meta, health, onics, autopilot } = snapshot;
   setLoginPrompt(meta, onics);
@@ -1079,6 +1096,15 @@ loginDismissBtn?.addEventListener("click", () => {
   loginModal?.setAttribute("aria-hidden", "true");
 });
 
+if (isDryRun) {
+  dismissLoadingScreen();
+  if (connectionPill) {
+    connectionPill.textContent = "LINK: DRY RUN";
+    connectionPill.style.borderColor = "rgba(148,163,184,0.7)";
+    connectionPill.style.color = "#cbd5f5";
+  }
+}
+
 const eventSource = new EventSource("/stream");
 
 eventSource.onopen = () => {
@@ -1099,10 +1125,12 @@ eventSource.addEventListener("log", (event) => {
 });
 
 eventSource.onerror = () => {
-  setOfflineState(true);
-  connectionPill.textContent = "LINK: OFFLINE";
-  connectionPill.style.borderColor = "rgba(249,115,22,0.6)";
-  connectionPill.style.color = "#f97316";
+  if (!isDryRun) {
+    setOfflineState(true);
+    connectionPill.textContent = "LINK: OFFLINE";
+    connectionPill.style.borderColor = "rgba(249,115,22,0.6)";
+    connectionPill.style.color = "#f97316";
+  }
   if (rebootPending) {
     rebootAwaitingLoss = false;
     setRebootOverlay(true);

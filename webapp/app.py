@@ -131,6 +131,7 @@ AUTO_RESTART_MAX = int(os.environ.get("AUTO_RESTART_MAX", "3"))
 # Flask server
 FLASK_HOST = os.environ.get("FLASK_HOST", "0.0.0.0").strip()
 FLASK_PORT = int(os.environ.get("FLASK_PORT", "8080"))
+DRY_RUN_ENV = os.environ.get("WATNE_DRY_RUN", "").strip()
 
 # ---- Helpers ----------------------------------------------------------------
 
@@ -141,6 +142,13 @@ def monotonic_s() -> float:
 
 def wall_time_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime())
+
+
+def env_truthy(value: str) -> bool:
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+DRY_RUN = env_truthy(DRY_RUN_ENV)
 
 
 _daemon_log_handle: Optional[TextIO] = None
@@ -1702,7 +1710,7 @@ app = Flask(__name__)
 
 @app.get("/")
 def index() -> str:
-    return render_template("index.html", title=APP_TITLE)
+    return render_template("index.html", title=APP_TITLE, dry_run=DRY_RUN)
 
 
 @app.get("/api/snapshot")
