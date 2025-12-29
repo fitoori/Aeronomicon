@@ -12,6 +12,21 @@ log() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+is_ardupilot_running() {
+    if pgrep -f "/usr/bin/arducopter" >/dev/null 2>&1; then
+        return 0
+    fi
+    if pgrep -f "arducopter" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet arducopter 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 signal_percent="NaN"
 if [[ -x "$SIGNAL_SCRIPT" ]]; then
     if signal_output=$("$SIGNAL_SCRIPT" 2>/dev/null); then
@@ -26,12 +41,17 @@ else
     log "LTE signal script not executable at $SIGNAL_SCRIPT; reporting NaN%."
 fi
 
-sensor_data="sensor data unavailable"
+sensor_status="sensor readings were unavailable."
 if [[ -x "$SENSOR_SCRIPT" ]]; then
     if sensor_output=$("$SENSOR_SCRIPT" 2>/dev/null); then
         sensor_output=$(echo "$sensor_output" | sed '/^\s*$/d')
         if [[ -n "$sensor_output" ]]; then
-            sensor_data=$(echo "$sensor_output" | tr '\n' '; ' | sed 's/[; ]*$//')
+            if echo "$sensor_output" | grep -q "Accelerometer:"; then
+                sensor_data=$(echo "$sensor_output" | tr '\n' '; ' | sed 's/[; ]*$//')
+                sensor_status="sensor readings: ${sensor_data}."
+            else
+                log "Sensor output missing expected fields; reporting unavailable sensor data."
+            fi
         fi
     else
         log "Sensor script failed; reporting unavailable sensor data."
@@ -40,7 +60,13 @@ else
     log "Sensor script not executable at $SENSOR_SCRIPT; reporting unavailable sensor data."
 fi
 
-message="insert data here"
+if [[ "$sensor_status" == "sensor readings were unavailable." ]]; then
+    if is_ardupilot_running; then
+        sensor_status="I wasn't able to get sensor readings because ArduPilot is running."
+    fi
+fi
+
+message="I'm alive! LTE Signal Strength is ${signal_percent}% and ${sensor_status}"
 
 if [[ ! -x "$DISCORD_SCRIPT" ]]; then
     log "Discord script not executable at $DISCORD_SCRIPT; unable to send message."
