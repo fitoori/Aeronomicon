@@ -7,6 +7,7 @@ SIGNAL_SCRIPT="${SCRIPT_DIR}/lte-signal-strength.sh"
 SENSOR_SCRIPT="${SCRIPT_DIR}/sensor-readings.sh"
 DISCORD_SCRIPT="/home/pi/Aeronomicon/util/discord.py"
 DISCORD_WEBHOOK="https://discord.com/api/webhooks/1454669304749621282/8LQlnXje9YyXtImmy7eDvARFAg7tYKqf16vuLiJPkQHW4OFXzJLAPSje7vVAi43jHqop"
+DRY_RUN=false
 
 log() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -67,6 +68,12 @@ if [[ "$sensor_status" == "sensor readings were unavailable." ]]; then
 fi
 
 message="I'm alive! LTE Signal Strength is ${signal_percent}% and ${sensor_status}"
+
+if [[ "$DRY_RUN" == "true" ]]; then
+    log "Dry run enabled; Discord message would be:"
+    printf '%s\n' "$message"
+    exit 0
+fi
 
 if [[ ! -x "$DISCORD_SCRIPT" ]]; then
     log "Discord script not executable at $DISCORD_SCRIPT; unable to send message."
