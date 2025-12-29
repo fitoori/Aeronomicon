@@ -152,13 +152,19 @@ if [[ -x "$SENSOR_SCRIPT" ]]; then
                     cpu_temp_display="${cpu_temp_value}℃"
                 fi
 
+                printf -v temperature_line '%-35s %s (CPU %s )' "Temperature" "$temperature_display" "$cpu_temp_display"
+                printf -v pressure_line '%-35s %s Pa' "Pressure" "$pressure_value"
+                printf -v accel_line '%-35s %s' "Accelerometer" "$average_accel"
+                printf -v gyro_line '%-35s %s' "Gyroscope:" "$average_gyro"
+                printf -v mag_line '%-35s %s' "Magnetometer:" "$average_mag"
+
                 sensor_status=$(cat <<EOF
 sensor readings are available.
-Temperature ${temperature_display} (CPU ${cpu_temp_display} )
-Pressure ${pressure_value} Pa
-Accelerometer ${average_accel}
-Gyroscope ${average_gyro}
-Magnetometer ${average_mag}
+$temperature_line
+$pressure_line
+$accel_line
+$gyro_line
+$mag_line
 EOF
 )
             else
