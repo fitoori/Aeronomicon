@@ -24,6 +24,146 @@ body {
   background: radial-gradient(circle at top, #163225, #0a120f 55%);
 }
 
+body[data-theme="eink"] {
+  color-scheme: light;
+  background: #f8f7f2;
+  color: #111111;
+  --panel: #ffffff;
+  --panel-accent: #f0f0ea;
+  --accent: #111111;
+  --accent-strong: #000000;
+  --warning: #444444;
+  --danger: #222222;
+  --critical: #000000;
+  --ok: #111111;
+  --muted: #444444;
+}
+
+body[data-theme="eink"] .shell__header {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  background: #f0f0ea;
+  box-shadow: none;
+}
+
+body[data-theme="eink"] .shell__logo-wrap {
+  background: #ffffff;
+  box-shadow: none;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+body[data-theme="eink"] .shell__logo-dropdown {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  box-shadow: none;
+}
+
+body[data-theme="eink"] .menu-action {
+  background: #ffffff;
+  color: #111111;
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+body[data-theme="eink"] .menu-action:hover {
+  border-color: rgba(0, 0, 0, 0.5);
+}
+
+body[data-theme="eink"] .menu-action--neutral {
+  background: #f7f7f2;
+}
+
+body[data-theme="eink"] .shell__status {
+  background: #f7f7f2;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  color: #111111;
+  box-shadow: none;
+  text-shadow: none;
+}
+
+body[data-theme="eink"] .panel {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: none;
+}
+
+body[data-theme="eink"] .toolbar {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+body[data-theme="eink"] .shell__stat-card {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.15);
+  box-shadow: none;
+}
+
+body[data-theme="eink"] .shell__stat-card .health-card__value {
+  color: #111111;
+  text-shadow: none;
+}
+
+body[data-theme="eink"] .btn--engage,
+body[data-theme="eink"] .btn--disengage {
+  background: #111111;
+  color: #ffffff;
+}
+
+body[data-theme="eink"] .btn--ghost {
+  border-color: rgba(0, 0, 0, 0.3);
+  color: #111111;
+}
+
+body[data-theme="eink"] .btn--service {
+  background: #f0f0ea;
+  border-color: rgba(0, 0, 0, 0.25);
+  color: #111111;
+}
+
+body[data-theme="eink"] .status-strip {
+  background: #f7f7f2;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+body[data-theme="eink"] .health-card {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+body[data-theme="eink"] .health-card__badge {
+  background: #f0f0ea;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  color: #111111;
+}
+
+body[data-theme="eink"] .log-view {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+body[data-theme="eink"] .loading-screen,
+body[data-theme="eink"] .offline-screen {
+  background: #f8f7f2;
+}
+
+body[data-theme="eink"] .modal {
+  background: rgba(247, 247, 242, 0.85);
+  backdrop-filter: none;
+}
+
+body[data-theme="eink"] .modal__panel {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  box-shadow: none;
+}
+
+body[data-theme="eink"] .modal__command {
+  background: #f7f7f2;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+body[data-theme="eink"] .modal__command code {
+  color: #111111;
+}
+
 img,
 canvas {
   max-width: 100%;
@@ -163,6 +303,12 @@ body.is-offline .shell {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+.menu-action--neutral {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 20, 0.6);
+  color: #e2e8f0;
 }
 
 .shell__eyebrow {

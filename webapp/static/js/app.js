@@ -19,6 +19,8 @@ const loginOpenBtn = document.getElementById("login-open-btn");
 const loginDismissBtn = document.getElementById("login-dismiss-btn");
 const serviceRestartButtons = document.querySelectorAll("[data-service-restart]");
 const serviceLogCards = document.querySelectorAll("[data-service-log]");
+const themeToggleBtn = document.getElementById("eink-toggle-btn");
+const themeMeta = document.querySelector('meta[name="theme-color"]');
 
 const tailscaleStatus = document.getElementById("tailscale-status");
 const tailscaleBackend = document.getElementById("tailscale-backend");
@@ -61,6 +63,9 @@ let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
 
+const THEME_STORAGE_KEY = "onics-theme";
+const THEME_EINK = "eink";
+
 function setLogoMenuOpen(open) {
   if (!logoMenuButton || !logoMenu) {
     return;
@@ -77,6 +82,22 @@ function setRebootOverlay(visible) {
   rebootScreen.classList.toggle("hidden", !visible);
   rebootScreen.setAttribute("aria-hidden", visible ? "false" : "true");
   document.body.classList.toggle("is-rebooting", visible);
+}
+
+function applyTheme(theme) {
+  const isEink = theme === THEME_EINK;
+  if (isEink) {
+    document.body.dataset.theme = THEME_EINK;
+  } else {
+    document.body.removeAttribute("data-theme");
+  }
+  if (themeToggleBtn) {
+    themeToggleBtn.setAttribute("aria-pressed", isEink ? "true" : "false");
+    themeToggleBtn.textContent = isEink ? "Disable eInk mode" : "Enable eInk mode";
+  }
+  if (themeMeta) {
+    themeMeta.setAttribute("content", isEink ? "#f8f7f2" : "#0a120f");
+  }
 }
 
 const cards = {
@@ -100,6 +121,31 @@ function setOfflineState(isOffline) {
     offlineScreen.setAttribute("aria-hidden", isOffline ? "false" : "true");
   }
 }
+
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener("click", () => {
+    const isEink = document.body.dataset.theme === THEME_EINK;
+    const nextTheme = isEink ? "dark" : THEME_EINK;
+    applyTheme(nextTheme);
+    try {
+      if (nextTheme === THEME_EINK) {
+        localStorage.setItem(THEME_STORAGE_KEY, THEME_EINK);
+      } else {
+        localStorage.removeItem(THEME_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.warn("Theme preference could not be saved:", error);
+    }
+  });
+}
+
+let storedTheme = null;
+try {
+  storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+} catch (error) {
+  console.warn("Theme preference could not be loaded:", error);
+}
+applyTheme(storedTheme === THEME_EINK ? THEME_EINK : "dark");
 
 function setCardState(card, state) {
   if (!card) {
