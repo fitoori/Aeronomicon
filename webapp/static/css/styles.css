@@ -773,6 +773,8 @@ body.is-rebooting .shell {
 
   .shell__stats {
     flex: 1 1 100%;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .shell__stat-card {
