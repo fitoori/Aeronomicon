@@ -152,13 +152,19 @@ if [[ -x "$SENSOR_SCRIPT" ]]; then
                     cpu_temp_display="${cpu_temp_value}℃"
                 fi
 
+                printf -v temperature_line '%-16s %s (CPU %s)' "Temperature:" "$temperature_display" "$cpu_temp_display"
+                printf -v pressure_line '%-16s %s Pa' "Pressure:" "$pressure_value"
+                printf -v accel_line '%-16s %s' "Accelerometer:" "$average_accel"
+                printf -v gyro_line '%-16s %s' "Gyroscope:" "$average_gyro"
+                printf -v mag_line '%-16s %s' "Magnetometer:" "$average_mag"
+
                 sensor_status=$(cat <<EOF
 sensor readings are available.
-Temperature ${temperature_display} (CPU ${cpu_temp_display} )
-Pressure ${pressure_value} Pa
-Accelerometer ${average_accel}
-Gyroscope ${average_gyro}
-Magnetometer ${average_mag}
+$temperature_line
+$pressure_line
+$accel_line
+$gyro_line
+$mag_line
 EOF
 )
             else
@@ -178,7 +184,7 @@ if [[ "$sensor_status" == "sensor readings were unavailable." ]]; then
     fi
 fi
 
-message="I'm alive! LTE Signal Strength is ${signal_percent}% and ${sensor_status}"
+message="I'm alive! LTE Signal Strength is **${signal_percent}%** and ${sensor_status}"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     log "Dry run enabled; Discord message would be:"
