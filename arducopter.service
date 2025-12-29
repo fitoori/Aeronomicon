@@ -11,7 +11,7 @@ EnvironmentFile=/etc/default/arducopter
 ####### DO NOT EDIT ABOVE THIS LINE UNLESS YOU KNOW WHAT YOU"RE DOING #########
 ###############################################################################
 
-ExecStartPre=/usr/local/bin/arducopter-prestart.sh
+ExecStartPre=/home/pi/Aeronomicon/util/arducopter-prestart.sh
 ExecStart=/bin/sh -c "/usr/bin/arducopter ${ARDUPILOT_OPTS}"
 
 ##### CAUTION ######
