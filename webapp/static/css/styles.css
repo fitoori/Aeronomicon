@@ -24,8 +24,8 @@ body {
   min-height: 100vh;
   background: linear-gradient(180deg, #163225 0%, #0a120f 55%);
   background-repeat: no-repeat;
-  background-position: 0 var(--page-top);
-  background-size: 100% calc(100% - var(--page-top));
+  background-position: 0 50%;
+  background-size: 100% 50%;
 }
 
 img,
