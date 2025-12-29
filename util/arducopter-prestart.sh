@@ -184,7 +184,7 @@ if [[ "$sensor_status" == "sensor readings were unavailable." ]]; then
     fi
 fi
 
-message="I'm alive! LTE Signal Strength is ${signal_percent}% and ${sensor_status}"
+message="I'm alive! LTE Signal Strength is **${signal_percent}%** and ${sensor_status}"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     log "Dry run enabled; Discord message would be:"
