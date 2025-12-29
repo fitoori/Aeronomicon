@@ -25,11 +25,11 @@ update_repo() {
 }
 
 prompt_service_replacement() {
-  local response
-  if [[ -t 0 ]]; then
-    read -r -p "Replace systemd service files with newer versions? [y/N] " response
-  else
-    response="n"
+  local response="n"
+  if [[ -r /dev/tty ]]; then
+    read -r -p "Replace systemd service files with newer versions? [y/N] " response </dev/tty || response="n"
+  elif [[ -t 0 ]]; then
+    read -r -p "Replace systemd service files with newer versions? [y/N] " response || response="n"
   fi
   case "${response}" in
     [Yy]|[Yy][Ee][Ss])
@@ -42,7 +42,7 @@ prompt_service_replacement() {
 }
 
 run_installer_update() {
-  local installer="${REPO_DIR}/legacy/install/install-services.sh"
+  local installer="${REPO_DIR}/util/services/install-services.sh"
   if [[ ! -x "${installer}" ]]; then
     echo "Installer not found or not executable: ${installer}" >&2
     exit 1
