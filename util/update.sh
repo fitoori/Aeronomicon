@@ -24,6 +24,11 @@ update_repo() {
   git -C "${REPO_DIR}" pull --ff-only
 }
 
+ensure_scripts_executable() {
+  log "Ensuring shell scripts are executable."
+  "${SUDO[@]}" find "${REPO_DIR}" -type f -name "*.sh" -exec chmod +x {} +
+}
+
 prompt_service_replacement() {
   local response="n"
   if [[ -r /dev/tty ]]; then
@@ -64,6 +69,7 @@ main() {
   require_command git
   require_command apt-get
   update_repo
+  ensure_scripts_executable
   update_system_packages
   prompt_service_replacement
   log "Update routine completed."
