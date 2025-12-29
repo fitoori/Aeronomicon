@@ -619,6 +619,19 @@ body.is-offline .shell {
   transition: opacity 0.4s ease;
 }
 
+.reboot-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 20px;
+  background: radial-gradient(circle, rgba(10, 18, 14, 0.92), rgba(3, 6, 5, 0.98));
+  z-index: 998;
+  transition: opacity 0.4s ease;
+}
+
 .loading-screen.hidden,
 .reboot-screen.hidden {
   opacity: 0;
