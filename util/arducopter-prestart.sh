@@ -33,7 +33,11 @@ if [[ -x "$SIGNAL_SCRIPT" ]]; then
     if signal_output=$("$SIGNAL_SCRIPT" 2>/dev/null); then
         parsed_percent=$(echo "$signal_output" | awk -F'Signal Strength: ' '{print $2}' | sed -n 's/%.*//p')
         if [[ -n "$parsed_percent" ]]; then
-            signal_percent="$parsed_percent"
+            if [[ "$parsed_percent" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+                signal_percent=$(awk -v val="$parsed_percent" 'BEGIN {printf "%.2f", val}')
+            else
+                signal_percent="$parsed_percent"
+            fi
         fi
     else
         log "LTE signal script failed; reporting NaN%."
@@ -48,8 +52,56 @@ if [[ -x "$SENSOR_SCRIPT" ]]; then
         sensor_output=$(echo "$sensor_output" | sed '/^\s*$/d')
         if [[ -n "$sensor_output" ]]; then
             if echo "$sensor_output" | grep -q "Accelerometer:"; then
-                sensor_data=$(echo "$sensor_output" | tr '\n' '; ' | sed 's/[; ]*$//')
-                sensor_status="sensor readings: ${sensor_data}."
+                accelerometer_line=$(echo "$sensor_output" | awk '/^Accelerometer:/ {print}')
+                gyroscope_line=$(echo "$sensor_output" | awk '/^Gyroscope:/ {print}')
+                magnetometer_line=$(echo "$sensor_output" | awk '/^Magnetometer:/ {print}')
+                pressure_line=$(echo "$sensor_output" | awk '/^Pressure:/ {print}')
+                temperature_line=$(echo "$sensor_output" | awk '/^Temperature:/ {print}')
+
+                average_vector() {
+                    local line="$1"
+                    if [[ -z "$line" ]]; then
+                        return 1
+                    fi
+                    local numbers
+                    numbers=$(echo "$line" | sed 's/^[^[]*\[//; s/\].*$//; s/,/ /g')
+                    if [[ -z "$numbers" ]]; then
+                        return 1
+                    fi
+                    awk '
+                        {
+                            sum=0
+                            count=0
+                            for (i=1; i<=NF; i++) {
+                                sum += $i
+                                count++
+                            }
+                            if (count > 0) {
+                                printf "%.2f", sum / count
+                            }
+                        }' <<<"$numbers"
+                }
+
+                average_accel=$(average_vector "$accelerometer_line" || true)
+                average_gyro=$(average_vector "$gyroscope_line" || true)
+                average_mag=$(average_vector "$magnetometer_line" || true)
+                average_accel=${average_accel:-unknown}
+                average_gyro=${average_gyro:-unknown}
+                average_mag=${average_mag:-unknown}
+
+                pressure_value=$(echo "$pressure_line" | awk '{print $2}')
+                temperature_value=$(echo "$temperature_line" | awk '{print $2}')
+
+                if [[ -n "$pressure_value" ]] && [[ "$pressure_value" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+                    pressure_value=$(awk -v val="$pressure_value" 'BEGIN {printf "%.2f", val}')
+                fi
+                if [[ -n "$temperature_value" ]] && [[ "$temperature_value" =~ ^-?[0-9]+([.][0-9]+)?$ ]]; then
+                    temperature_value=$(awk -v val="$temperature_value" 'BEGIN {printf "%.2f", val}')
+                fi
+                pressure_value=${pressure_value:-unknown}
+                temperature_value=${temperature_value:-unknown}
+
+                sensor_status="sensor readings: average accelerometer ${average_accel}, average gyroscope ${average_gyro}, average magnetometer ${average_mag}, pressure ${pressure_value} Pa, temperature ${temperature_value} C."
             else
                 log "Sensor output missing expected fields; reporting unavailable sensor data."
             fi
