@@ -3,7 +3,13 @@ Description= MAVproxy Service for WATNE
 After=network.target
 
 [Service]
-ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=/dev/ttyUSB0 --no-state --daemon
+
+# uncomment below line if you're using a SiK Radio
+# ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=/dev/ttyUSB0 --no-state --daemon
+
+# tailnet GCS endpoint
+ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=udp://100.105.72.112:14550 --no-state --daemon
+
 WorkingDirectory=/home/pi/
 StandardOutput=inherit
 StandardError=inherit
