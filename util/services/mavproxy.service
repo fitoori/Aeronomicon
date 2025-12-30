@@ -8,7 +8,7 @@ After=network.target
 # ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=/dev/ttyUSB0 --no-state --daemon
 
 # tailnet GCS endpoint
-ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=udp://100.105.72.112:14550 --no-state --daemon
+ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=udp://0.0.0.0:14552 --no-state --daemon
 
 WorkingDirectory=/home/pi/
 StandardOutput=inherit
