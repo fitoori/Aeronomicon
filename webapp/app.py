@@ -784,7 +784,7 @@ class OnicsController:
                     delta_rx = int(delta_rx_value)
                     delta_tx = int(delta_tx_value)
             self._last_wwan_bytes = (wwan_rx, wwan_tx)
-            active = bool(delta_tx and delta_tx > 0)
+            active = bool((delta_rx and delta_rx > 0) or (delta_tx and delta_tx > 0))
         else:
             self._last_wwan_bytes = None
 
