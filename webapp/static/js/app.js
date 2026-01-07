@@ -14,6 +14,7 @@ const loginModal = document.getElementById("login-modal");
 const loginMessage = document.getElementById("login-message");
 const loginCommand = document.getElementById("login-command");
 const loginMoshCommandWrap = document.getElementById("login-mosh-command-wrap");
+const loginMoshLabel = document.getElementById("login-mosh-label");
 const loginMoshCommand = document.getElementById("login-mosh-command");
 const loginSetupCommand = document.getElementById("login-setup-command");
 const loginKeygenCommand = document.getElementById("login-keygen-command");
@@ -674,6 +675,7 @@ function setLoginPrompt(meta, onics) {
     !loginMessage ||
     !loginCommand ||
     !loginMoshCommandWrap ||
+    !loginMoshLabel ||
     !loginMoshCommand ||
     !loginSetupCommand ||
     !loginKeygenCommand ||
@@ -692,37 +694,46 @@ function setLoginPrompt(meta, onics) {
     loginMessage.textContent =
       onics.login_message ||
       "SSH authentication is missing. Complete an interactive login to continue.";
-    loginCommand.textContent = sshCommand;
-    loginMoshCommand.textContent = moshCommand;
+    const showMosh = Boolean(meta.mosh_available);
+    loginCommand.textContent = showMosh ? moshCommand : sshCommand;
+    loginMoshLabel.textContent = showMosh ? "SSH fallback" : "Mosh";
+    loginMoshCommand.textContent = showMosh ? sshCommand : moshCommand;
     loginSetupCommand.textContent = sshSetupCommand;
     loginKeygenCommand.textContent = sshKeygenCommand;
-    loginOpenBtn.onclick = () => {
-      window.location.href = sshUri;
-    };
-    loginMoshCopyBtn.onclick = () => {
-      const originalLabel = loginMoshCopyBtn.textContent;
+    const copyCommand = (button, command, promptLabel) => {
+      const originalLabel = button.textContent;
       const finish = (label) => {
-        loginMoshCopyBtn.textContent = label;
+        button.textContent = label;
         window.setTimeout(() => {
-          loginMoshCopyBtn.textContent = originalLabel;
+          button.textContent = originalLabel;
         }, 1500);
       };
       if (navigator?.clipboard?.writeText) {
         navigator.clipboard
-          .writeText(moshCommand)
+          .writeText(command)
           .then(() => finish("Copied!"))
           .catch(() => {
-            window.prompt("Copy mosh command:", moshCommand);
+            window.prompt(promptLabel, command);
             finish("Copy command");
           });
       } else {
-        window.prompt("Copy mosh command:", moshCommand);
+        window.prompt(promptLabel, command);
         finish("Copy command");
       }
     };
-    const showMosh = Boolean(meta.mosh_available);
+    loginOpenBtn.textContent = showMosh ? "Copy Mosh Command" : "Open SSH Login";
+    loginOpenBtn.onclick = () => {
+      if (showMosh) {
+        copyCommand(loginOpenBtn, moshCommand, "Copy mosh command:");
+      } else {
+        window.location.href = sshUri;
+      }
+    };
+    loginMoshCopyBtn.onclick = () => {
+      copyCommand(loginMoshCopyBtn, moshCommand, "Copy mosh command:");
+    };
     loginMoshCommandWrap.classList.toggle("is-hidden", !showMosh);
-    loginMoshCopyBtn.classList.toggle("is-hidden", !showMosh);
+    loginMoshCopyBtn.classList.add("is-hidden");
     loginModal.classList.add("is-visible");
     loginModal.setAttribute("aria-hidden", "false");
   } else {
