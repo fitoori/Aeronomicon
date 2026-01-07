@@ -343,6 +343,10 @@ body.is-offline .shell {
   margin-top: -4px;
 }
 
+.is-hidden {
+  display: none !important;
+}
+
 .btn {
   font-size: 0.95rem;
   font-weight: 600;
