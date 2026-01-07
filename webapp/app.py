@@ -835,7 +835,6 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err)
                 stats["lte_signal_error"] = f"SSH error: {err}"
                 self._lte_signal_cache = stats
                 return dict(stats)
