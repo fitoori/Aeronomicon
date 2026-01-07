@@ -24,6 +24,35 @@ body {
   background: radial-gradient(circle at top, #163225, #0a120f 55%);
 }
 
+.lte-banner {
+  position: sticky;
+  top: 0;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 0.7rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.18);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.4);
+  padding: 4px 12px;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-6px);
+  overflow: hidden;
+  transition: opacity 0.2s ease, transform 0.2s ease, max-height 0.2s ease;
+  backdrop-filter: blur(8px);
+}
+
+.lte-banner.is-visible {
+  max-height: 32px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 img,
 canvas {
   max-width: 100%;

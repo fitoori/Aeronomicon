@@ -16,6 +16,9 @@
     <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
   </head>
   <body data-dry-run="{{ 'true' if dry_run else 'false' }}">
+    <div class="lte-banner" id="lte-banner" aria-live="polite" aria-hidden="true">
+      LTE bandwidth in use (WWAN0)
+    </div>
     <div class="loading-screen" id="loading-screen" aria-live="polite">
       <img
         src="{{ url_for('static', filename='img/onics-seal.svg') }}"
