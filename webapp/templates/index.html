@@ -53,6 +53,10 @@
           <span>Command</span>
           <code id="login-command">ssh user@host</code>
         </div>
+        <div class="modal__command is-hidden" id="login-mosh-command-wrap">
+          <span>Mosh</span>
+          <code id="login-mosh-command">mosh user@host</code>
+        </div>
         <div class="modal__command">
           <span>Setup key</span>
           <code id="login-setup-command">ssh-copy-id user@host</code>
@@ -63,6 +67,7 @@
         </div>
         <div class="button-row">
           <button class="btn btn--engage" id="login-open-btn">Open SSH Login</button>
+          <button class="btn btn--ghost is-hidden" id="login-mosh-copy-btn">Copy Mosh Command</button>
           <button class="btn btn--ghost" id="login-dismiss-btn">Dismiss</button>
         </div>
       </div>

@@ -85,6 +85,7 @@ SSH_PORT = int(SSH_PORT_ENV or "22")
 SSH_USER_ENV = os.environ.get("WATNE_SSH_USER")
 SSH_USER = (SSH_USER_ENV or "pi").strip()
 SSH_CONFIG_PATH = os.path.expanduser(os.environ.get("WATNE_SSH_CONFIG", "~/.ssh/config"))
+MOSH_ENABLED_ENV = os.environ.get("WATNE_MOSH_ENABLE", "1")
 
 # Remote script path (as provided)
 REMOTE_ONICS_T_PATH = "~/Aeronomicon/onics-t.py"
@@ -204,6 +205,9 @@ def which_or_none(exe: str) -> Optional[str]:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
+
+
+MOSH_AVAILABLE = env_truthy(MOSH_ENABLED_ENV) and which_or_none("mosh") is not None
 
 
 def load_ssh_config() -> Optional[paramiko.SSHConfig]:
@@ -570,6 +574,7 @@ class OnicsController:
                 "hostname": hostname,
                 "ssh_user": username,
                 "ssh_port": port,
+                "mosh_available": MOSH_AVAILABLE,
                 "server_time_iso": wall_time_iso(),
             },
             "health": hl,
