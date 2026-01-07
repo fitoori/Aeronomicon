@@ -449,6 +449,7 @@ class OnicsController:
         self._service_backoff_s = 0.0
         self._system_backoff_until = 0.0
         self._system_backoff_s = 0.0
+        self._last_wwan_bytes: Optional[Tuple[int, int]] = None
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -607,6 +608,11 @@ class OnicsController:
             "disk_total_bytes": None,
             "disk_used_bytes": None,
             "disk_free_bytes": None,
+            "wwan0_rx_bytes": None,
+            "wwan0_tx_bytes": None,
+            "wwan0_delta_rx_bytes": None,
+            "wwan0_delta_tx_bytes": None,
+            "wwan0_active": False,
         }
 
     @classmethod
@@ -685,6 +691,24 @@ class OnicsController:
             except ValueError:
                 pass
 
+        if len(parts) >= 5:
+            for line in parts[4].splitlines():
+                if ":" not in line:
+                    continue
+                iface, data = line.split(":", 1)
+                iface = iface.strip()
+                if iface != "wwan0":
+                    continue
+                fields = data.split()
+                if len(fields) < 9:
+                    continue
+                try:
+                    stats["wwan0_rx_bytes"] = int(fields[0])
+                    stats["wwan0_tx_bytes"] = int(fields[8])
+                except ValueError:
+                    pass
+                break
+
         return stats
 
     def _fetch_remote_system_stats(self, client: paramiko.SSHClient) -> Dict[str, Any]:
@@ -699,7 +723,9 @@ class OnicsController:
             "echo $df_line | awk \"{print \\$2, \\$3, \\$4}\"; "
             "else df -k / 2>/dev/null | tail -n 1 | awk \"{print \\$2 * 1024, \\$3 * 1024, \\$4 * 1024}\"; fi; "
             "echo \"---\"; "
-            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0'"
+            "getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 0; "
+            "echo \"---\"; "
+            "cat /proc/net/dev 2>/dev/null'"
         )
         _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
         output = stdout.read().decode("utf-8", errors="replace")
@@ -744,6 +770,28 @@ class OnicsController:
                 except Exception:
                     pass
 
+        wwan_rx = stats.get("wwan0_rx_bytes")
+        wwan_tx = stats.get("wwan0_tx_bytes")
+        delta_rx: Optional[int] = None
+        delta_tx: Optional[int] = None
+        active = False
+        if wwan_rx is not None and wwan_tx is not None:
+            if self._last_wwan_bytes is not None:
+                last_rx, last_tx = self._last_wwan_bytes
+                delta_rx_value = wwan_rx - last_rx
+                delta_tx_value = wwan_tx - last_tx
+                if delta_rx_value >= 0 and delta_tx_value >= 0:
+                    delta_rx = int(delta_rx_value)
+                    delta_tx = int(delta_tx_value)
+            self._last_wwan_bytes = (wwan_rx, wwan_tx)
+            active = bool((delta_rx and delta_rx > 0) or (delta_tx and delta_tx > 0))
+        else:
+            self._last_wwan_bytes = None
+
+        stats["wwan0_delta_rx_bytes"] = delta_rx
+        stats["wwan0_delta_tx_bytes"] = delta_tx
+        stats["wwan0_active"] = active
+
         with self._lock:
             self._autopilot.system = stats
         self._system_backoff_s = 0.0
@@ -787,7 +835,6 @@ class OnicsController:
             client, err, _ms = self._ssh_connect()
             if client is None:
                 self._mark_failure()
-                self._handle_ssh_failure(err)
                 stats["lte_signal_error"] = f"SSH error: {err}"
                 self._lte_signal_cache = stats
                 return dict(stats)

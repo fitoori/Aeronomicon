@@ -8,6 +8,7 @@ const connectionPill = document.getElementById("connection-pill");
 const logoMenuButton = document.getElementById("logo-menu-button");
 const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
+const lteBanner = document.getElementById("lte-banner");
 const onicsState = document.querySelector("#onics-state .status-strip__value");
 const onicsRuntime = document.getElementById("onics-runtime");
 const loginModal = document.getElementById("login-modal");
@@ -94,6 +95,14 @@ function setRebootOverlay(visible) {
   rebootScreen.classList.toggle("hidden", !visible);
   rebootScreen.setAttribute("aria-hidden", visible ? "false" : "true");
   document.body.classList.toggle("is-rebooting", visible);
+}
+
+function setLteBanner(active) {
+  if (!lteBanner) {
+    return;
+  }
+  lteBanner.classList.toggle("is-visible", active);
+  lteBanner.setAttribute("aria-hidden", active ? "false" : "true");
 }
 
 const cards = {
@@ -888,6 +897,7 @@ function updateSnapshot(snapshot, options = {}) {
 
   if (autopilot && autopilot.system) {
     const system = autopilot.system;
+    setLteBanner(Boolean(system.wwan0_active));
     if (uplinkSignalValue) {
       if (Number.isFinite(system.lte_signal_percent)) {
         uplinkSignalValue.textContent = `${Math.round(system.lte_signal_percent)}%`;
@@ -966,6 +976,10 @@ function updateSnapshot(snapshot, options = {}) {
   }
 
   updateEngageToggle(onics);
+
+  if (!autopilot || !autopilot.system) {
+    setLteBanner(false);
+  }
 
   const restartReady = health.tailscale_ok && health.dns_ok && health.tcp_ok && !rebootPending;
   serviceRestartButtons.forEach((button) => {
