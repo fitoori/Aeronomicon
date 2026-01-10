@@ -1400,7 +1400,11 @@ class OnicsController:
                 exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
                 detail = (err or "").strip()
                 if exit_status == 0:
-                    lines = [line for line in out.splitlines() if line.strip()]
+                    lines = [
+                        line
+                        for line in out.splitlines()
+                        if line.strip() and "blob data" not in line
+                    ]
                     ok = True
                     break
         except Exception as e:
