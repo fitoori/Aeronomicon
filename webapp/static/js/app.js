@@ -991,6 +991,9 @@ function updateSnapshot(snapshot, options = {}) {
 }
 
 function appendLog(line) {
+  if (line.includes("blob data")) {
+    return;
+  }
   parseTelemetry(line);
   const renderedLine = formatLogTimestamp(line);
   const div = document.createElement("div");
