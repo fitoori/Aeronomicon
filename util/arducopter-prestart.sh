@@ -196,8 +196,11 @@ fi
 
 if [[ ! -x "$DISCORD_SCRIPT" ]]; then
     log "Discord script not executable at $DISCORD_SCRIPT; unable to send message."
-    exit 1
+    exit 0
 fi
 
-/usr/bin/python3 "$DISCORD_SCRIPT" --webhook "$DISCORD_WEBHOOK" "$message"
-log "Discord notification sent."
+if /usr/bin/python3 "$DISCORD_SCRIPT" --webhook "$DISCORD_WEBHOOK" "$message"; then
+    log "Discord notification sent."
+else
+    log "Discord notification failed; continuing startup."
+fi
