@@ -50,8 +50,17 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Required command not found: $1" >&2
+    exit 1
+  fi
+}
+
 detect_uplink_service() {
-  if systemctl status uplink.service >/dev/null 2>&1; then
+  local load_state
+  load_state="$(systemctl show -p LoadState --value uplink.service 2>/dev/null || true)"
+  if [[ -n "${load_state}" && "${load_state}" != "not-found" ]]; then
     uplink_available=true
   fi
 }
@@ -122,7 +131,7 @@ check_non_wwan_internet() {
     echo "Default route uses wwan0. A non-wwan0 connection is required before installing services." >&2
     exit 1
   fi
-  if ! ping -I "${route_dev}" -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
+  if ! curl --interface "${route_dev}" --connect-timeout 5 --max-time 10 -fsS https://1.1.1.1/cdn-cgi/trace >/dev/null 2>&1; then
     echo "No internet connectivity detected on ${route_dev}." >&2
     exit 1
   fi
@@ -132,6 +141,9 @@ prepare_network_for_install() {
   if [[ "${mode}" == "update" ]]; then
     return
   fi
+  require_command ip
+  require_command curl
+  require_command systemctl
   check_non_wwan_internet
   detect_uplink_service
   record_uplink_state

@@ -24,7 +24,9 @@ WWAN_PRESENT=false
 WWAN_WAS_UP=false
 
 detect_uplink_service() {
-  if systemctl status uplink.service >/dev/null 2>&1; then
+  local load_state
+  load_state="$(systemctl show -p LoadState --value uplink.service 2>/dev/null || true)"
+  if [[ -n "${load_state}" && "${load_state}" != "not-found" ]]; then
     UPLINK_AVAILABLE=true
   fi
 }
@@ -102,7 +104,7 @@ check_non_wwan_internet() {
     echo "Default route uses wwan0. A non-wwan0 connection is required before updating." >&2
     exit 1
   fi
-  if ! ping -I "${route_dev}" -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
+  if ! curl --interface "${route_dev}" --connect-timeout 5 --max-time 10 -fsS https://1.1.1.1/cdn-cgi/trace >/dev/null 2>&1; then
     echo "No internet connectivity detected on ${route_dev}." >&2
     exit 1
   fi
@@ -159,7 +161,7 @@ main() {
   require_command git
   require_command apt-get
   require_command ip
-  require_command ping
+  require_command curl
   require_command systemctl
   check_non_wwan_internet
   detect_uplink_service
