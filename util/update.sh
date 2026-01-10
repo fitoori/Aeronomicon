@@ -25,7 +25,23 @@ update_repo() {
 }
 
 ensure_scripts_executable() {
-  log "Ensuring shell scripts are executable."
+  log "Ensuring scripts are executable."
+  local scripts=(
+    "${REPO_DIR}/util/arducopter-prestart.sh"
+    "${REPO_DIR}/util/lte-signal-strength.sh"
+    "${REPO_DIR}/util/sensor-readings.sh"
+    "${REPO_DIR}/util/discord.py"
+    "${REPO_DIR}/uplink.sh"
+    "${REPO_DIR}/legacy/ONICS2.py"
+    "${REPO_DIR}/legacy/onlcs-lite.py"
+  )
+  for script in "${scripts[@]}"; do
+    if [[ ! -f "${script}" ]]; then
+      echo "Expected script not found: ${script}" >&2
+      exit 1
+    fi
+    "${SUDO[@]}" chmod +x "${script}"
+  done
   "${SUDO[@]}" find "${REPO_DIR}" -type f -name "*.sh" -exec chmod +x {} +
 }
 
