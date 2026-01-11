@@ -1,0 +1,19 @@
+/* Monochrome mode for E-ink displays */
+:root {
+  --panel: #ffffff;
+  --accent: #000000;
+  --accent-muted: #555555;
+  --text: #000000;
+  --text-muted: #333333;
+  --alert: #000000;
+}
+
+body, html {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  filter: none !important;
+}
+
+img, svg {
+  filter: grayscale(100%) contrast(100%) !important;
+}
