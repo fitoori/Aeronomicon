@@ -12,6 +12,8 @@
   --critical: #ef4444;
   --ok: #4ade80;
   --muted: #9ca3af;
+  --graph-load: rgba(74, 222, 128, 0.85);
+  --graph-memory: rgba(96, 165, 250, 0.85);
 }
 
 * {
@@ -192,6 +194,16 @@ body.is-offline .shell {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+.menu-action--neutral {
+  border-color: rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.45);
+  color: #e2e8f0;
+}
+
+.menu-action--neutral:hover {
+  border-color: rgba(148, 163, 184, 0.7);
 }
 
 .shell__eyebrow {
@@ -810,6 +822,128 @@ body.is-rebooting .shell {
   100% {
     box-shadow: 0 0 0 rgba(74, 222, 128, 0.0);
   }
+}
+
+body.is-monochrome {
+  background: #ffffff;
+  color: #000000;
+  --panel: #ffffff;
+  --panel-accent: #ffffff;
+  --accent: #000000;
+  --accent-strong: #000000;
+  --warning: #000000;
+  --danger: #000000;
+  --critical: #000000;
+  --ok: #000000;
+  --muted: #1a1a1a;
+  --graph-load: #000000;
+  --graph-memory: #000000;
+}
+
+body.is-monochrome img {
+  filter: grayscale(1) contrast(1.2);
+}
+
+body.is-monochrome .shell__header,
+body.is-monochrome .shell__stat-card,
+body.is-monochrome .panel,
+body.is-monochrome .toolbar,
+body.is-monochrome .loading-screen,
+body.is-monochrome .reboot-screen,
+body.is-monochrome .offline-screen,
+body.is-monochrome .modal__panel,
+body.is-monochrome .health-card,
+body.is-monochrome .log-view,
+body.is-monochrome .status-strip,
+body.is-monochrome .modal__command {
+  background: #ffffff;
+  box-shadow: none;
+  border: 1px solid #000000;
+}
+
+body.is-monochrome .shell__header {
+  border-bottom: 1px solid #000000;
+}
+
+body.is-monochrome .shell__status {
+  background: #ffffff;
+  border-color: #000000;
+  color: #000000;
+  text-shadow: none;
+}
+
+body.is-monochrome .btn--engage,
+body.is-monochrome .btn--disengage,
+body.is-monochrome .btn--service {
+  background: #ffffff;
+  color: #000000;
+  border: 1px solid #000000;
+}
+
+body.is-monochrome .btn--ghost {
+  border-color: #000000;
+  color: #000000;
+}
+
+body.is-monochrome .shell__logo-wrap {
+  background: #ffffff;
+  box-shadow: none;
+}
+
+body.is-monochrome .shell__logo-dropdown {
+  background: #ffffff;
+  border-color: #000000;
+  box-shadow: none;
+}
+
+body.is-monochrome .menu-action {
+  border-color: #000000;
+  background: #ffffff;
+  color: #000000;
+}
+
+body.is-monochrome .menu-action:hover {
+  border-color: #ffffff;
+}
+
+body.is-monochrome .health-card__badge,
+body.is-monochrome .health-card__signal-value,
+body.is-monochrome .status-strip__label,
+body.is-monochrome .shell__eyebrow {
+  color: #000000;
+}
+
+body.is-monochrome .health-card__badge {
+  background: #ffffff;
+  border-color: #000000;
+}
+
+body.is-monochrome .log-line {
+  border-bottom-color: #000000;
+}
+
+body.is-monochrome .lte-banner {
+  color: #000000;
+  background: #ffffff;
+  border-bottom-color: #000000;
+  text-shadow: none;
+}
+
+body.is-monochrome .loading-logo {
+  filter: grayscale(1) contrast(1.2);
+}
+
+body.is-monochrome .age--yellow,
+body.is-monochrome .age--orange,
+body.is-monochrome .age--red {
+  color: #000000;
+}
+
+body.is-monochrome .health-card--ok,
+body.is-monochrome .health-card--warn,
+body.is-monochrome .health-card--danger {
+  border-color: #000000;
+  box-shadow: none;
 }
 
 @media (max-width: 960px) {
