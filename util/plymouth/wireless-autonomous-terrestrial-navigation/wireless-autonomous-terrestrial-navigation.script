@@ -2,39 +2,41 @@
 # Generated assets: seal.png, pulse_*.png, sheen_*.png
 # Animation: fade-in + radial pulse + sweeping sheen
 
-fun scale_image_to_fit(image)
-{
-    width = image.GetWidth();
-    height = image.GetHeight();
-    scale = 1.0;
-
-    if (width > screen_width)
-    {
-        scale = screen_width / width;
-    }
-
-    if (height * scale > screen_height)
-    {
-        scale = screen_height / height;
-    }
-
-    if (scale < 1.0)
-    {
-        image = image.Scale(width * scale, height * scale);
-    }
-
-    return image;
-}
-
-seal_image = Image("seal.png");
-seal_sprite = Sprite(seal_image);
-seal_sprite.SetZ(-100);
-
 pulse_images = [];
 sheen_images = [];
 
 PULSE_FRAMES = 24;
 SHEEN_FRAMES = 36;
+
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+fun scale_image_to_fit(image)
+{
+    image_width = image.GetWidth();
+    image_height = image.GetHeight();
+
+    if (image_width <= screen_width && image_height <= screen_height)
+    {
+        return image;
+    }
+
+    scale_x = screen_width / image_width;
+    scale_y = screen_height / image_height;
+    scale = scale_x;
+
+    if (scale_y < scale)
+    {
+        scale = scale_y;
+    }
+
+    return image.Scale(image_width * scale, image_height * scale);
+}
+
+seal_image = Image("seal.png");
+seal_image = scale_image_to_fit(seal_image);
+seal_sprite = Sprite(seal_image);
+seal_sprite.SetZ(-100);
 
 for (i = 0; i < PULSE_FRAMES; i = i + 1)
 {
