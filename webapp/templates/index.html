@@ -160,9 +160,18 @@
       </section>
 
       <section class="grid">
-        <article class="panel">
+        <article class="panel" id="telemetry-panel">
           <header class="panel__header panel__header--actions">
-            <h2>Telemetry Log</h2>
+            <h2
+              class="telemetry-log__title"
+              id="telemetry-log-toggle"
+              role="button"
+              tabindex="0"
+              aria-expanded="false"
+              aria-controls="log-view"
+            >
+              Telemetry Log
+            </h2>
             <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
           </header>
           <div class="panel__body panel__body--logs">
