@@ -8,6 +8,7 @@ const connectionPill = document.getElementById("connection-pill");
 const logoMenuButton = document.getElementById("logo-menu-button");
 const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
+const monochromeToggle = document.getElementById("monochrome-toggle");
 const lteBanner = document.getElementById("lte-banner");
 const onicsState = document.querySelector("#onics-state .status-strip__value");
 const onicsRuntime = document.getElementById("onics-runtime");
@@ -71,6 +72,8 @@ const isDryRun =
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
+let isMonochromeMode = false;
+let connectionStatus = "ok";
 
 function dismissLoadingScreen() {
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
@@ -103,6 +106,53 @@ function setLteBanner(active) {
   }
   lteBanner.classList.toggle("is-visible", active);
   lteBanner.setAttribute("aria-hidden", active ? "false" : "true");
+}
+
+function setMonochromeMode(enabled) {
+  isMonochromeMode = enabled;
+  document.body.classList.toggle("is-monochrome", enabled);
+  if (monochromeToggle) {
+    monochromeToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+    monochromeToggle.textContent = enabled ? "Disable monochrome mode" : "Enable monochrome mode";
+  }
+  if (connectionPill) {
+    const pillStyles = getConnectionPillStyles(connectionStatus);
+    connectionPill.style.borderColor = pillStyles.borderColor;
+    connectionPill.style.color = pillStyles.color;
+  }
+  try {
+    window.localStorage.setItem("monochrome-mode", enabled ? "true" : "false");
+  } catch (err) {
+    console.warn("Unable to store monochrome preference", err);
+  }
+  drawAllLoadGraphs();
+  drawAllMemoryGraphs();
+}
+
+function getGraphColor(token, fallback) {
+  const value = getComputedStyle(document.body).getPropertyValue(token).trim();
+  return value || fallback;
+}
+
+function getConnectionPillStyles(status) {
+  if (isMonochromeMode) {
+    const accent = getGraphColor("--accent", "#000000");
+    const muted = getGraphColor("--muted", "#1a1a1a");
+    if (status === "ok") {
+      return { borderColor: accent, color: accent };
+    }
+    if (status === "degraded") {
+      return { borderColor: muted, color: muted };
+    }
+    return { borderColor: "#4d4d4d", color: "#4d4d4d" };
+  }
+  if (status === "ok") {
+    return { borderColor: "rgba(74,222,128,0.5)", color: "#4ade80" };
+  }
+  if (status === "degraded") {
+    return { borderColor: "rgba(245,158,11,0.6)", color: "#f59e0b" };
+  }
+  return { borderColor: "rgba(249,115,22,0.6)", color: "#f97316" };
 }
 
 const cards = {
@@ -346,7 +396,7 @@ function drawLoadGraph(graph) {
   const paddedMax = maxLoad * 1.1;
   const start = now - loadHistoryWindowMs;
 
-  graph.context.strokeStyle = "rgba(74, 222, 128, 0.85)";
+  graph.context.strokeStyle = getGraphColor("--graph-load", "rgba(74, 222, 128, 0.85)");
   graph.context.lineWidth = 2;
   graph.context.beginPath();
 
@@ -394,7 +444,7 @@ function drawMemoryGraph(graph) {
   const paddedMax = totalMax * 1.05;
   const start = now - memoryHistoryWindowMs;
 
-  graph.context.strokeStyle = "rgba(96, 165, 250, 0.85)";
+  graph.context.strokeStyle = getGraphColor("--graph-memory", "rgba(96, 165, 250, 0.85)");
   graph.context.lineWidth = 2;
   graph.context.beginPath();
 
@@ -796,16 +846,10 @@ function updateSnapshot(snapshot, options = {}) {
     : linkDegraded
       ? "LINK: DEGRADED"
       : "LINK: OK";
-  connectionPill.style.borderColor = health.los
-    ? "rgba(249,115,22,0.6)"
-    : linkDegraded
-      ? "rgba(245,158,11,0.6)"
-      : "rgba(74,222,128,0.5)";
-  connectionPill.style.color = health.los
-    ? "#f97316"
-    : linkDegraded
-      ? "#f59e0b"
-      : "#4ade80";
+  connectionStatus = health.los ? "los" : linkDegraded ? "degraded" : "ok";
+  const pillStyles = getConnectionPillStyles(connectionStatus);
+  connectionPill.style.borderColor = pillStyles.borderColor;
+  connectionPill.style.color = pillStyles.color;
 
   if (onicsState) {
     onicsState.textContent = onics.state;
@@ -1162,9 +1206,27 @@ if (isDryRun) {
   dismissLoadingScreen();
   if (connectionPill) {
     connectionPill.textContent = "LINK: DRY RUN";
-    connectionPill.style.borderColor = "rgba(148,163,184,0.7)";
-    connectionPill.style.color = "#cbd5f5";
+    connectionStatus = "degraded";
+    const pillStyles = getConnectionPillStyles(connectionStatus);
+    connectionPill.style.borderColor = pillStyles.borderColor;
+    connectionPill.style.color = pillStyles.color;
   }
+}
+
+if (monochromeToggle) {
+  monochromeToggle.addEventListener("click", () => {
+    setMonochromeMode(!isMonochromeMode);
+    setLogoMenuOpen(false);
+  });
+}
+
+try {
+  const storedPreference = window.localStorage.getItem("monochrome-mode");
+  if (storedPreference) {
+    setMonochromeMode(storedPreference === "true");
+  }
+} catch (err) {
+  console.warn("Unable to read monochrome preference", err);
 }
 
 const eventSource = new EventSource("/stream");
@@ -1190,8 +1252,10 @@ eventSource.onerror = () => {
   if (!isDryRun) {
     setOfflineState(true);
     connectionPill.textContent = "LINK: OFFLINE";
-    connectionPill.style.borderColor = "rgba(249,115,22,0.6)";
-    connectionPill.style.color = "#f97316";
+    connectionStatus = "los";
+    const pillStyles = getConnectionPillStyles(connectionStatus);
+    connectionPill.style.borderColor = pillStyles.borderColor;
+    connectionPill.style.color = pillStyles.color;
   }
   if (rebootPending) {
     rebootAwaitingLoss = false;
