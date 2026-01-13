@@ -511,7 +511,29 @@ PY
       out="$(printf '%s\n' "${cmd}" | "${SUDO[@]}" timeout 2s nc -U /tmp/pisugar-server.sock 2>/dev/null || true)"
     fi
   else
-    out="$(printf '%s\n' "${cmd}" | "${SUDO[@]}" timeout 2s nc -q 0 127.0.0.1 8423 2>/dev/null || true)"
+    if command -v python3 >/dev/null 2>&1; then
+      out="$("${SUDO[@]}" python3 - "${cmd}" <<'PY'
+import socket, sys
+cmd=(sys.argv[1]+"\n").encode()
+s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(1.5)
+s.connect(("127.0.0.1", 8423))
+s.sendall(cmd)
+chunks=[]
+while True:
+  try:
+    d=s.recv(4096)
+    if not d: break
+    chunks.append(d)
+  except socket.timeout:
+    break
+s.close()
+print(b"".join(chunks).decode(errors="ignore"), end="")
+PY
+)"
+    else
+      out="$(printf '%s\n' "${cmd}" | "${SUDO[@]}" timeout 2s nc -q 0 127.0.0.1 8423 2>/dev/null || true)"
+    fi
   fi
 
   echo "${out}" | sed -e 's/\r$//' | sed -e '/^[[:space:]]*$/d'
