@@ -134,6 +134,10 @@ function getGraphColor(token, fallback) {
   return value || fallback;
 }
 
+function getGraphLineWidth() {
+  return isMonochromeMode ? 3 : 2;
+}
+
 function getConnectionPillStyles(status) {
   if (isMonochromeMode) {
     const accent = getGraphColor("--accent", "#000000");
@@ -404,7 +408,7 @@ function drawLoadGraph(graph) {
   const start = now - loadHistoryWindowMs;
 
   graph.context.strokeStyle = getGraphColor("--graph-load", "rgba(74, 222, 128, 0.85)");
-  graph.context.lineWidth = 2;
+  graph.context.lineWidth = getGraphLineWidth();
   graph.context.beginPath();
 
   loadHistory.forEach((entry, index) => {
@@ -452,7 +456,7 @@ function drawMemoryGraph(graph) {
   const start = now - memoryHistoryWindowMs;
 
   graph.context.strokeStyle = getGraphColor("--graph-memory", "rgba(96, 165, 250, 0.85)");
-  graph.context.lineWidth = 2;
+  graph.context.lineWidth = getGraphLineWidth();
   graph.context.beginPath();
 
   memoryHistory.forEach((entry, index) => {
