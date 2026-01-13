@@ -377,6 +377,7 @@ class OnicsRuntime:
     state: str = "IDLE"  # IDLE|STARTING|RUNNING|STOPPING|ERROR|LOS
     running_since_mono: float = 0.0
     last_output_mono: float = 0.0
+    last_output_iso: str = ""
     last_ssh_ok_mono: float = 0.0
     last_state_change_mono: float = 0.0
 
@@ -450,6 +451,7 @@ class OnicsController:
         self._system_backoff_until = 0.0
         self._system_backoff_s = 0.0
         self._last_wwan_bytes: Optional[Tuple[int, int]] = None
+        self._last_status_payload: Optional[Dict[str, Any]] = None
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -464,6 +466,7 @@ class OnicsController:
         with self._lock:
             self._logs.append(full)
             self._runtime.last_output_mono = monotonic_s()
+            self._runtime.last_output_iso = ts
         self._broker.publish("log", {"line": full, "ts": now_ms()})
 
     def clear_logs(self) -> None:
@@ -543,7 +546,7 @@ class OnicsController:
         else:
             self._set_login_prompt(False, "")
 
-    def snapshot(self, *, include_logs: bool = True) -> Dict[str, Any]:
+    def snapshot(self, *, include_logs: bool = True, include_ages: bool = True) -> Dict[str, Any]:
         hostname, username, port, _identity_files, _proxycommand = self._resolve_ssh_settings()
         with self._lock:
             rt = dataclasses.asdict(self._runtime)
@@ -551,24 +554,25 @@ class OnicsController:
             ap = dataclasses.asdict(self._autopilot)
             logs = list(self._logs)[-MAX_LOG_LINES:] if include_logs else []
         ap["system"].update(self._lte_signal_stats())
-        # Derived ages (computed server-side)
-        now_m = monotonic_s()
-        rt["state_age_s"] = round(max(0.0, now_m - rt.get("last_state_change_mono", 0.0)), 3)
-        rt["last_output_age_s"] = (
-            round(max(0.0, now_m - rt.get("last_output_mono", 0.0)), 3)
-            if rt.get("last_output_mono", 0.0)
-            else None
-        )
-        rt["last_ssh_ok_age_s"] = (
-            round(max(0.0, now_m - rt.get("last_ssh_ok_mono", 0.0)), 3)
-            if rt.get("last_ssh_ok_mono", 0.0)
-            else None
-        )
-        hl["last_ok_age_s"] = (
-            round(max(0.0, now_m - hl.get("last_ok_mono", 0.0)), 3)
-            if hl.get("last_ok_mono", 0.0)
-            else None
-        )
+        if include_ages:
+            # Derived ages (computed server-side)
+            now_m = monotonic_s()
+            rt["state_age_s"] = round(max(0.0, now_m - rt.get("last_state_change_mono", 0.0)), 3)
+            rt["last_output_age_s"] = (
+                round(max(0.0, now_m - rt.get("last_output_mono", 0.0)), 3)
+                if rt.get("last_output_mono", 0.0)
+                else None
+            )
+            rt["last_ssh_ok_age_s"] = (
+                round(max(0.0, now_m - rt.get("last_ssh_ok_mono", 0.0)), 3)
+                if rt.get("last_ssh_ok_mono", 0.0)
+                else None
+            )
+            hl["last_ok_age_s"] = (
+                round(max(0.0, now_m - hl.get("last_ok_mono", 0.0)), 3)
+                if hl.get("last_ok_mono", 0.0)
+                else None
+            )
         return {
             "meta": {
                 "title": APP_TITLE,
@@ -584,8 +588,29 @@ class OnicsController:
             "logs": logs,
         }
 
+    @staticmethod
+    def _prune_status_fields(data: Dict[str, Any]) -> None:
+        for key in list(data.keys()):
+            if key.endswith("_mono") or key.endswith("_age_s"):
+                data.pop(key, None)
+
+    def _status_payload(self) -> Dict[str, Any]:
+        snapshot = self.snapshot(include_logs=False, include_ages=False)
+        snapshot.pop("logs", None)
+        meta = snapshot.get("meta", {})
+        meta.pop("server_time_iso", None)
+        onics = snapshot.get("onics", {})
+        health = snapshot.get("health", {})
+        self._prune_status_fields(onics)
+        self._prune_status_fields(health)
+        return snapshot
+
     def publish_status(self) -> None:
-        self._broker.publish("status", self.snapshot(include_logs=False))
+        payload = self._status_payload()
+        if payload == self._last_status_payload:
+            return
+        self._last_status_payload = payload
+        self._broker.publish("status", payload)
 
     # --- Health checks
 
@@ -1280,6 +1305,7 @@ class OnicsController:
             self._runtime.ssh_connect_ms = 0
             self._runtime.running_since_mono = 0.0
             self._runtime.last_output_mono = 0.0
+            self._runtime.last_output_iso = ""
             self._runtime.last_ssh_ok_mono = 0.0
             self._runtime.login_required = False
             self._runtime.login_message = ""
@@ -1821,7 +1847,7 @@ def stream() -> Response:
     Server-Sent Events stream.
 
     Emits:
-      event: status  -> periodic full snapshot
+      event: status  -> periodic status snapshot
       event: state   -> state changes
       event: log     -> incremental log lines
     """
@@ -1829,8 +1855,9 @@ def stream() -> Response:
 
     # Initial snapshot and existing log buffer:
     snapshot = controller.snapshot()
+    status_payload = controller._status_payload()
     init_payloads: List[str] = []
-    init_payloads.append(f"event: status\ndata: {safe_json_dumps(snapshot)}\n\n")
+    init_payloads.append(f"event: status\ndata: {safe_json_dumps(status_payload)}\n\n")
     for line in snapshot.get("logs", []):
         init_payloads.append(f"event: log\ndata: {safe_json_dumps({'line': line, 'ts': now_ms()})}\n\n")
 

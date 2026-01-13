@@ -74,6 +74,7 @@ let rebootPending = false;
 let rebootAwaitingLoss = false;
 let isMonochromeMode = false;
 let connectionStatus = "ok";
+let latestSnapshot = null;
 
 function dismissLoadingScreen() {
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
@@ -223,12 +224,36 @@ function formatAge(value) {
   return `${rounded} seconds ago`;
 }
 
+function resolveAgeSeconds(ageValue, timestampIso) {
+  if (timestampIso) {
+    const computed = ageSecondsFromTimestamp(timestampIso);
+    if (computed !== null) {
+      return computed;
+    }
+  }
+  if (ageValue !== null && ageValue !== undefined && Number.isFinite(Number(ageValue))) {
+    return Number(ageValue);
+  }
+  return null;
+}
+
 function formatSeconds(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) {
     return "n/a";
   }
   const seconds = Math.max(0, Math.floor(Number(value)));
   return `${seconds} seconds`;
+}
+
+function renderOnicsRuntime(onics) {
+  if (!onicsRuntime || !onics) {
+    return;
+  }
+  const lastOutputAge = resolveAgeSeconds(onics.last_output_age_s, onics.last_output_iso);
+  onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
+    lastOutputAge
+  )}`;
+  setAgeSeverity(onicsRuntime, lastOutputAge);
 }
 
 function normalizeTimestamp(ts) {
@@ -814,6 +839,7 @@ function updateSnapshot(snapshot, options = {}) {
   if (!snapshot) {
     return;
   }
+  latestSnapshot = snapshot;
   if (options.fromStream) {
     setOfflineState(false);
   }
@@ -861,12 +887,7 @@ function updateSnapshot(snapshot, options = {}) {
   if (onicsState) {
     onicsState.textContent = onics.state;
   }
-  if (onicsRuntime) {
-    onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
-      onics.last_output_age_s
-    )}`;
-    setAgeSeverity(onicsRuntime, onics.last_output_age_s);
-  }
+  renderOnicsRuntime(onics);
   if (startupFails) {
     const restartFails = Number.isFinite(onics.restart_failures)
       ? onics.restart_failures
@@ -1269,6 +1290,13 @@ eventSource.onerror = () => {
     setRebootOverlay(true);
   }
 };
+
+setInterval(() => {
+  if (!latestSnapshot) {
+    return;
+  }
+  renderOnicsRuntime(latestSnapshot.onics);
+}, 1000);
 
 if (loadGraphs.length) {
   const resizeObserver = new ResizeObserver(() => {
