@@ -24,6 +24,24 @@ WWAN_PRESENT=false
 WWAN_WAS_UP=false
 PISUGAR_PRESENT=false
 PISUGAR_PACKAGES=()
+FULL_UPDATE=false
+
+check_hostname() {
+  local current_hostname=""
+  if command -v hostname >/dev/null 2>&1; then
+    current_hostname="$(hostname 2>/dev/null || true)"
+  fi
+  case "${current_hostname}" in
+    WATNE|watne)
+      FULL_UPDATE=true
+      log "hostname verified - proceeding with full update procedure and verification. Please ensure the vehicle is grounded."
+      ;;
+    *)
+      FULL_UPDATE=false
+      log "Hostname mismatch - treating device as Base Station / Auxiliary Device."
+      ;;
+  esac
+}
 
 detect_uplink_service() {
   local load_state
@@ -299,9 +317,15 @@ main() {
   require_command ip
   require_command curl
   require_command systemctl
+  require_command hostname
+  check_hostname
   check_non_wwan_internet
   detect_uplink_service
-  detect_pisugar_packages
+  if [[ "${FULL_UPDATE}" == true ]]; then
+    detect_pisugar_packages
+  else
+    log "Skipping PiSugar checks on non-vehicle host."
+  fi
   record_uplink_state
   record_wwan_state
   trap '' HUP
@@ -326,8 +350,12 @@ main() {
   update_repo
   ensure_scripts_executable
   update_system_packages
-  configure_pisugar_for_navio2
-  prompt_service_replacement
+  if [[ "${FULL_UPDATE}" == true ]]; then
+    configure_pisugar_for_navio2
+    prompt_service_replacement
+  else
+    log "Skipping PiSugar configuration and service installation on non-vehicle host."
+  fi
   log "Update routine completed."
 }
 
