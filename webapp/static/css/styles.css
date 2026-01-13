@@ -943,7 +943,9 @@ body.is-monochrome .modal__command {
 }
 
 body.is-monochrome .shell__header {
-  border-bottom: var(--mono-border);
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 body.is-monochrome .shell__status {
@@ -959,6 +961,16 @@ body.is-monochrome .btn--service {
   background: #ffffff;
   color: #000000;
   border: var(--mono-border);
+}
+
+body.is-monochrome .btn--engage {
+  border: none;
+  box-shadow: none;
+}
+
+body.is-monochrome .btn--engage:focus-visible {
+  outline: 2px solid #000000;
+  outline-offset: 2px;
 }
 
 body.is-monochrome .btn--ghost {
