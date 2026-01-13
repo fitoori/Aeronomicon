@@ -171,14 +171,18 @@ enable_soft_i2c_bus() {
     exit 1
   fi
 
-  if ! dpkg -s i2c-tools >/dev/null 2>&1; then
-    log "Installing i2c-tools."
-    "${SUDO[@]}" apt-get install -y i2c-tools
-  fi
+  if command -v dpkg >/dev/null 2>&1; then
+    if ! dpkg -s i2c-tools >/dev/null 2>&1; then
+      log "Installing i2c-tools."
+      "${SUDO[@]}" apt-get install -y i2c-tools
+    fi
 
-  if ! dpkg -s raspberrypi-kernel-headers >/dev/null 2>&1; then
-    log "Installing raspberrypi-kernel-headers."
-    "${SUDO[@]}" apt-get install -y raspberrypi-kernel-headers
+    if ! dpkg -s raspberrypi-kernel-headers >/dev/null 2>&1; then
+      log "Installing raspberrypi-kernel-headers."
+      "${SUDO[@]}" apt-get install -y raspberrypi-kernel-headers
+    fi
+  else
+    log "dpkg not available; skipping package checks for i2c-tools and kernel headers."
   fi
 
   if command -v rg >/dev/null 2>&1; then
@@ -187,6 +191,7 @@ enable_soft_i2c_bus() {
     match_cmd=(grep -q "^${overlay_line}$")
   fi
 
+  local overlay_added=false
   if "${match_cmd[@]}" "${config_file}"; then
     log "Soft I2C overlay already present."
   else
@@ -195,13 +200,18 @@ enable_soft_i2c_bus() {
     "${SUDO[@]}" cp "${config_file}" "${backup_path}"
     log "Adding soft I2C overlay to ${config_file}."
     printf '%s\n' "${overlay_line}" | "${SUDO[@]}" tee -a "${config_file}" >/dev/null
+    overlay_added=true
   fi
 
   log "Enabling I2C via raspi-config."
   "${SUDO[@]}" raspi-config nonint do_i2c 0
 
-  log "Validating I2C bus 3."
-  "${SUDO[@]}" i2cdetect -y 3 >/dev/null
+  if [[ "${overlay_added}" == true ]]; then
+    log "Soft I2C overlay added; reboot required before validation."
+  else
+    log "Validating I2C bus 3."
+    "${SUDO[@]}" i2cdetect -y 3 >/dev/null
+  fi
 
   if [[ "${trap_set}" == true ]]; then
     trap - ERR
