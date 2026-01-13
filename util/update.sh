@@ -267,14 +267,23 @@ install_webapp_service_port_80() {
   local service_dest="/etc/systemd/system/webapp.service"
   local override_dir="/etc/systemd/system/webapp.service.d"
   local override_file="${override_dir}/override.conf"
+  local webapp_dir="${REPO_DIR}/webapp"
+  local app_path="${webapp_dir}/app.py"
+  local webapp_user="${SUDO_USER:-$(id -un)}"
 
   [[ -f "${service_src}" ]] || die "Webapp service file not found: ${service_src}"
+  [[ -d "${webapp_dir}" ]] || die "Webapp directory not found: ${webapp_dir}"
+  [[ -f "${app_path}" ]] || die "Webapp entrypoint not found: ${app_path}"
 
   log "Installing webapp systemd service (port 80)."
   "${SUDO[@]}" install -m 644 "${service_src}" "${service_dest}"
   "${SUDO[@]}" mkdir -p "${override_dir}"
-  "${SUDO[@]}" tee "${override_file}" >/dev/null <<'EOF'
+  "${SUDO[@]}" tee "${override_file}" >/dev/null <<EOF
 [Service]
+WorkingDirectory=${REPO_DIR}/webapp
+ExecStart=
+ExecStart=/usr/bin/python3 ${REPO_DIR}/webapp/app.py
+User=${webapp_user}
 Environment=FLASK_PORT=80
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
