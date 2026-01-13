@@ -150,6 +150,7 @@ def env_truthy(value: str) -> bool:
 
 
 DRY_RUN = env_truthy(DRY_RUN_ENV)
+LOAD_ONLY = False
 
 
 _daemon_log_handle: Optional[TextIO] = None
@@ -1766,7 +1767,12 @@ app = Flask(__name__)
 
 @app.get("/")
 def index() -> str:
-    return render_template("index.html", title=APP_TITLE, dry_run=DRY_RUN)
+    return render_template(
+        "index.html",
+        title=APP_TITLE,
+        dry_run=DRY_RUN,
+        load_only=LOAD_ONLY,
+    )
 
 
 @app.get("/api/snapshot")
@@ -1909,8 +1915,15 @@ def main() -> int:
         default=None,
         help="Optional log file for daemon mode (default: discard output).",
     )
+    parser.add_argument(
+        "--load-only",
+        action="store_true",
+        help="Always display the loading screen (for layout testing).",
+    )
     args = parser.parse_args()
     flask_port = args.port
+    global LOAD_ONLY
+    LOAD_ONLY = args.load_only
 
     if args.daemon:
         _daemonize(args.daemon_log_file)
