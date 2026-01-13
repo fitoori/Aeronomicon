@@ -136,6 +136,15 @@ function getGraphColor(token, fallback) {
 
 function getConnectionPillStyles(status) {
   if (isMonochromeMode) {
+    const accent = getGraphColor("--accent", "#000000");
+    const muted = getGraphColor("--muted", "#1a1a1a");
+    if (status === "ok") {
+      return { borderColor: accent, color: accent };
+    }
+    if (status === "degraded") {
+      return { borderColor: muted, color: muted };
+    }
+    return { borderColor: "#4d4d4d", color: "#4d4d4d" };
     if (status === "ok") {
       return { borderColor: "#ffffff", color: "#ffffff" };
     }
