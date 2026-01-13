@@ -801,28 +801,6 @@ main() {
   trap '' HUP
   trap cleanup EXIT
 
-  # If WATNE: validate PiSugar early and do RTC->Pi sync before any TLS network ops.
-  if [[ "${FULL_UPDATE}" == true ]]; then
-    # Try to ensure soft I2C is configured (vehicle-only); does not hard-fail if not applicable.
-    enable_soft_i2c_bus_if_vehicle
-
-    # Validate PiSugar server path (end-to-end I2C read via server).
-    ensure_pisugar_validated
-
-    # Optional explicit I2C scan validation (also vehicle-only).
-    detect_pisugar_i2c_bus_and_model
-    if [[ -n "${PISUGAR_I2C_BUS}" ]]; then
-      log "PiSugar I2C devices detected on /dev/i2c-${PISUGAR_I2C_BUS} (${PISUGAR_MODEL})."
-    else
-      warn "PiSugar I2C addresses not detected via i2cdetect. If using pogo pins, check contact/solder mask per PiSugar FAQ."
-    fi
-
-    # Use RTC immediately for plausible system time.
-    pisugar_rtc_sync_sequence
-  else
-    log "Skipping PiSugar validation steps on non-vehicle host."
-  fi
-
   # Now confirm we have non-wwan internet for update.
   check_non_wwan_internet
 
@@ -857,10 +835,30 @@ main() {
     log "Skipping service installation on non-vehicle host."
   fi
 
-  # Final authoritative RTC sync + verification + battery report (vehicle only)
+  # Run PiSugar checks last to avoid interfering with the update sequence.
   if [[ "${FULL_UPDATE}" == true ]]; then
-    pisugar_rtc_web_sync_and_verify
-    pisugar_report_battery
+    # Try to ensure soft I2C is configured (vehicle-only); does not hard-fail if not applicable.
+    enable_soft_i2c_bus_if_vehicle || true
+
+    # Validate PiSugar server path (end-to-end I2C read via server).
+    ensure_pisugar_validated || true
+
+    # Optional explicit I2C scan validation (also vehicle-only).
+    detect_pisugar_i2c_bus_and_model || true
+    if [[ -n "${PISUGAR_I2C_BUS}" ]]; then
+      log "PiSugar I2C devices detected on /dev/i2c-${PISUGAR_I2C_BUS} (${PISUGAR_MODEL})."
+    else
+      warn "PiSugar I2C addresses not detected via i2cdetect. If using pogo pins, check contact/solder mask per PiSugar FAQ."
+    fi
+
+    # Use RTC immediately for plausible system time.
+    pisugar_rtc_sync_sequence || true
+
+    # Final authoritative RTC sync + verification + battery report (vehicle only)
+    pisugar_rtc_web_sync_and_verify || true
+    pisugar_report_battery || true
+  else
+    log "Skipping PiSugar validation steps on non-vehicle host."
   fi
 
   log "Update routine completed."
