@@ -635,7 +635,10 @@ pisugar_repair_and_validate() {
   # Ensure service exists
   local load_state
   load_state="$(systemctl show -p LoadState --value pisugar-server.service 2>/dev/null || true)"
-  [[ -n "${load_state}" && "${load_state}" != "not-found" ]] || die "pisugar-server.service not installed on WATNE."
+  if [[ -z "${load_state}" || "${load_state}" == "not-found" ]]; then
+    warn "pisugar-server.service not installed on WATNE; skipping PiSugar validation."
+    return 1
+  fi
 
   # Start service (if stopped)
   "${SUDO[@]}" systemctl start pisugar-server.service || true
@@ -666,7 +669,8 @@ pisugar_repair_and_validate() {
       "${SUDO[@]}" shutdown -r now "Reboot required to activate I2C for PiSugar"
       exit 0
     fi
-    die "Cannot proceed on WATNE until I2C is active and PiSugar is readable."
+    warn "Cannot proceed on WATNE until I2C is active and PiSugar is readable."
+    return 1
   fi
 
   # 2) Ensure pisugar-server has I2C permissions.
@@ -677,7 +681,8 @@ pisugar_repair_and_validate() {
   bus="$(find_pisugar3_bus || true)"
   if [[ -z "${bus}" ]]; then
     pisugar_collect_failure_bundle
-    die "PiSugar3 I2C address 0x57 not detected on any /dev/i2c-* bus. Software remediation exhausted."
+    warn "PiSugar3 I2C address 0x57 not detected on any /dev/i2c-* bus. Software remediation exhausted."
+    return 1
   fi
   log "Detected PiSugar3 on I2C bus ${bus} (0x57 present)."
 
@@ -693,14 +698,18 @@ pisugar_repair_and_validate() {
 
   # Final: diagnostics + fail hard.
   pisugar_collect_failure_bundle
-  die "PiSugar still reports I2C failure after remediation. See ${DIAG_FILE} for full diagnostics."
+  warn "PiSugar still reports I2C failure after remediation. See ${DIAG_FILE} for full diagnostics."
+  return 1
 }
 
 ensure_pisugar_validated() {
   # On WATNE we treat PiSugar verification as REQUIRED.
   [[ "${FULL_UPDATE}" == true ]] || return 0
 
-  pisugar_repair_and_validate
+  if ! pisugar_repair_and_validate; then
+    warn "PiSugar validation failed; continuing update without PiSugar integration."
+    return 1
+  fi
 
   local model_out
   model_out="$(pisugar_cmd "get model" || true)"
@@ -732,11 +741,17 @@ pisugar_rtc_web_sync_and_verify() {
   [[ "${PISUGAR_VALIDATED}" == true ]] || return 0
 
   log "PiSugar RTC authoritative sync: applying rtc_web (Web => RTC & Pi)."
-  pisugar_cmd "rtc_web" >/dev/null || die "rtc_web failed; cannot guarantee RTC+Pi are synchronized."
+  if ! pisugar_cmd "rtc_web" >/dev/null; then
+    warn "rtc_web failed; cannot guarantee RTC+Pi are synchronized."
+    return 1
+  fi
 
   local rtc_line rtc_iso sys_epoch rtc_epoch delta
   rtc_line="$(pisugar_cmd "get rtc_time" | awk -F': ' '/^rtc_time:/{print $2; exit}' || true)"
-  [[ -n "${rtc_line}" ]] || die "Unable to read rtc_time after rtc_web."
+  if [[ -z "${rtc_line}" ]]; then
+    warn "Unable to read rtc_time after rtc_web."
+    return 1
+  fi
 
   # Compare system time vs RTC time (allow small drift)
   sys_epoch="$(date +%s)"
@@ -748,7 +763,8 @@ pisugar_rtc_web_sync_and_verify() {
 
   if (( sys_epoch > rtc_epoch )); then delta=$((sys_epoch - rtc_epoch)); else delta=$((rtc_epoch - sys_epoch)); fi
   if (( delta > 120 )); then
-    die "RTC sync validation failed: system vs PiSugar RTC differ by ${delta}s after rtc_web."
+    warn "RTC sync validation failed: system vs PiSugar RTC differ by ${delta}s after rtc_web."
+    return 1
   fi
 
   log "RTC sync validation passed (system vs PiSugar RTC delta ${delta}s)."
@@ -759,7 +775,10 @@ pisugar_report_battery() {
   local battery_out pct
   battery_out="$(pisugar_cmd "get battery" || true)"
   pct="$(echo "${battery_out}" | awk -F': ' '/^battery:/{print $2; exit}' || true)"
-  [[ -n "${pct}" ]] || die "Unable to parse PiSugar battery percentage from: ${battery_out}"
+  if [[ -z "${pct}" ]]; then
+    warn "Unable to parse PiSugar battery percentage from: ${battery_out}"
+    return 1
+  fi
   log "PiSugar battery percentage (end of test): ${pct}%"
 }
 
@@ -781,28 +800,6 @@ main() {
 
   trap '' HUP
   trap cleanup EXIT
-
-  # If WATNE: validate PiSugar early and do RTC->Pi sync before any TLS network ops.
-  if [[ "${FULL_UPDATE}" == true ]]; then
-    # Try to ensure soft I2C is configured (vehicle-only); does not hard-fail if not applicable.
-    enable_soft_i2c_bus_if_vehicle
-
-    # Validate PiSugar server path (end-to-end I2C read via server).
-    ensure_pisugar_validated
-
-    # Optional explicit I2C scan validation (also vehicle-only).
-    detect_pisugar_i2c_bus_and_model
-    if [[ -n "${PISUGAR_I2C_BUS}" ]]; then
-      log "PiSugar I2C devices detected on /dev/i2c-${PISUGAR_I2C_BUS} (${PISUGAR_MODEL})."
-    else
-      warn "PiSugar I2C addresses not detected via i2cdetect. If using pogo pins, check contact/solder mask per PiSugar FAQ."
-    fi
-
-    # Use RTC immediately for plausible system time.
-    pisugar_rtc_sync_sequence
-  else
-    log "Skipping PiSugar validation steps on non-vehicle host."
-  fi
 
   # Now confirm we have non-wwan internet for update.
   check_non_wwan_internet
@@ -838,10 +835,30 @@ main() {
     log "Skipping service installation on non-vehicle host."
   fi
 
-  # Final authoritative RTC sync + verification + battery report (vehicle only)
+  # Run PiSugar checks last to avoid interfering with the update sequence.
   if [[ "${FULL_UPDATE}" == true ]]; then
-    pisugar_rtc_web_sync_and_verify
-    pisugar_report_battery
+    # Try to ensure soft I2C is configured (vehicle-only); does not hard-fail if not applicable.
+    enable_soft_i2c_bus_if_vehicle || true
+
+    # Validate PiSugar server path (end-to-end I2C read via server).
+    ensure_pisugar_validated || true
+
+    # Optional explicit I2C scan validation (also vehicle-only).
+    detect_pisugar_i2c_bus_and_model || true
+    if [[ -n "${PISUGAR_I2C_BUS}" ]]; then
+      log "PiSugar I2C devices detected on /dev/i2c-${PISUGAR_I2C_BUS} (${PISUGAR_MODEL})."
+    else
+      warn "PiSugar I2C addresses not detected via i2cdetect. If using pogo pins, check contact/solder mask per PiSugar FAQ."
+    fi
+
+    # Use RTC immediately for plausible system time.
+    pisugar_rtc_sync_sequence || true
+
+    # Final authoritative RTC sync + verification + battery report (vehicle only)
+    pisugar_rtc_web_sync_and_verify || true
+    pisugar_report_battery || true
+  else
+    log "Skipping PiSugar validation steps on non-vehicle host."
   fi
 
   log "Update routine completed."
