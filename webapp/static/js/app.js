@@ -1,6 +1,7 @@
 const engageToggleBtn = document.getElementById("engage-toggle-btn");
 const clearBtn = document.getElementById("clear-btn");
 const logView = document.getElementById("log-view");
+const telemetryLogToggle = document.getElementById("telemetry-log-toggle");
 const loadingScreen = document.getElementById("loading-screen");
 const offlineScreen = document.getElementById("offline-screen");
 const rebootScreen = document.getElementById("reboot-screen");
@@ -79,6 +80,7 @@ let rebootAwaitingLoss = false;
 let isMonochromeMode = false;
 let connectionStatus = "ok";
 let latestSnapshot = null;
+let telemetryLogExpanded = false;
 
 function setLoadingState(enabled) {
   document.body?.classList.toggle("is-loading", enabled);
@@ -119,6 +121,27 @@ function setLteBanner(active) {
   }
   lteBanner.classList.toggle("is-visible", active);
   lteBanner.setAttribute("aria-hidden", active ? "false" : "true");
+}
+
+function updateTelemetryLogHeight() {
+  if (!telemetryLogExpanded || !logView) {
+    return;
+  }
+  const rect = logView.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const padding = 24;
+  const height = Math.max(200, Math.floor(viewportHeight - rect.top - padding));
+  document.documentElement.style.setProperty("--telemetry-log-height", `${height}px`);
+}
+
+function setTelemetryLogExpanded(expanded) {
+  telemetryLogExpanded = expanded;
+  document.body?.classList.toggle("is-telemetry-log-expanded", expanded);
+  telemetryLogToggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (!expanded) {
+    document.documentElement.style.removeProperty("--telemetry-log-height");
+  }
+  updateTelemetryLogHeight();
 }
 
 function setMonochromeMode(enabled) {
@@ -1141,6 +1164,17 @@ clearBtn?.addEventListener("click", async () => {
   }
 });
 
+telemetryLogToggle?.addEventListener("click", () => {
+  setTelemetryLogExpanded(!telemetryLogExpanded);
+});
+
+telemetryLogToggle?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    setTelemetryLogExpanded(!telemetryLogExpanded);
+  }
+});
+
 serviceRestartButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const service = button.getAttribute("data-service-restart");
@@ -1214,6 +1248,10 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setLogoMenuOpen(false);
   }
+});
+
+window.addEventListener("resize", () => {
+  updateTelemetryLogHeight();
 });
 
 rebootBtn?.addEventListener("click", async () => {
