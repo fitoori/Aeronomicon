@@ -145,6 +145,13 @@ function getConnectionPillStyles(status) {
       return { borderColor: muted, color: muted };
     }
     return { borderColor: "#4d4d4d", color: "#4d4d4d" };
+    if (status === "ok") {
+      return { borderColor: "#ffffff", color: "#ffffff" };
+    }
+    if (status === "degraded") {
+      return { borderColor: "#b5b5b5", color: "#b5b5b5" };
+    }
+    return { borderColor: "#666666", color: "#e0e0e0" };
   }
   if (status === "ok") {
     return { borderColor: "rgba(74,222,128,0.5)", color: "#4ade80" };
