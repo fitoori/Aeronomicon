@@ -15,7 +15,10 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
     <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
   </head>
-  <body data-dry-run="{{ 'true' if dry_run else 'false' }}">
+  <body
+    data-dry-run="{{ 'true' if dry_run else 'false' }}"
+    data-load-only="{{ 'true' if load_only else 'false' }}"
+  >
     <div class="lte-banner" id="lte-banner" aria-live="polite" aria-hidden="true">
       LTE bandwidth in use (WWAN0)
     </div>
@@ -157,9 +160,18 @@
       </section>
 
       <section class="grid">
-        <article class="panel">
+        <article class="panel" id="telemetry-panel">
           <header class="panel__header panel__header--actions">
-            <h2>Telemetry Log</h2>
+            <h2
+              class="telemetry-log__title"
+              id="telemetry-log-toggle"
+              role="button"
+              tabindex="0"
+              aria-expanded="false"
+              aria-controls="log-view"
+            >
+              Telemetry Log
+            </h2>
             <button class="btn btn--ghost" id="clear-btn">Clear Logs</button>
           </header>
           <div class="panel__body panel__body--logs">

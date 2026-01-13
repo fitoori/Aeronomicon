@@ -1,6 +1,7 @@
 const engageToggleBtn = document.getElementById("engage-toggle-btn");
 const clearBtn = document.getElementById("clear-btn");
 const logView = document.getElementById("log-view");
+const telemetryLogToggle = document.getElementById("telemetry-log-toggle");
 const loadingScreen = document.getElementById("loading-screen");
 const offlineScreen = document.getElementById("offline-screen");
 const rebootScreen = document.getElementById("reboot-screen");
@@ -65,19 +66,35 @@ const headerDisk = document.getElementById("header-disk");
 
 const urlParams = new URLSearchParams(window.location.search);
 const dryRunParam = (urlParams.get("dry_run") || "").toLowerCase();
+const loadOnlyParam = (urlParams.get("load_only") || "").toLowerCase();
 const isDryRun =
   document.body?.dataset.dryRun === "true" ||
   ["1", "true", "yes", "on"].includes(dryRunParam);
+const isLoadOnly =
+  document.body?.dataset.loadOnly === "true" ||
+  ["1", "true", "yes", "on"].includes(loadOnlyParam);
+
+const MIN_TELEMETRY_LOG_HEIGHT = 0;
 
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
 let isMonochromeMode = false;
 let connectionStatus = "ok";
+let latestSnapshot = null;
+let telemetryLogExpanded = false;
+
+function setLoadingState(enabled) {
+  document.body?.classList.toggle("is-loading", enabled);
+}
 
 function dismissLoadingScreen() {
+  if (isLoadOnly) {
+    return;
+  }
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
     loadingScreen.classList.add("hidden");
+    setLoadingState(false);
     setTimeout(() => loadingScreen.remove(), 600);
   }
 }
@@ -106,6 +123,46 @@ function setLteBanner(active) {
   }
   lteBanner.classList.toggle("is-visible", active);
   lteBanner.setAttribute("aria-hidden", active ? "false" : "true");
+}
+
+function updateTelemetryLogHeight() {
+  if (!telemetryLogExpanded || !logView) {
+    return;
+  }
+  const documentElement = document.documentElement;
+  const applyHeight = () => {
+    const rect = logView.getBoundingClientRect();
+    const slack = documentElement.clientHeight - documentElement.scrollHeight;
+    document.body?.classList.toggle("is-telemetry-log-compact", slack < 0);
+    const height = Math.max(MIN_TELEMETRY_LOG_HEIGHT, Math.floor(rect.height + slack));
+    documentElement.style.setProperty("--telemetry-log-height", `${height}px`);
+  };
+  applyHeight();
+  requestAnimationFrame(() => {
+    if (!telemetryLogExpanded || !logView) {
+      return;
+    }
+    const slack = documentElement.clientHeight - documentElement.scrollHeight;
+    if (Math.abs(slack) > 1) {
+      applyHeight();
+    }
+  });
+  const rect = logView.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const padding = 24;
+  const height = Math.max(200, Math.floor(viewportHeight - rect.top - padding));
+  document.documentElement.style.setProperty("--telemetry-log-height", `${height}px`);
+}
+
+function setTelemetryLogExpanded(expanded) {
+  telemetryLogExpanded = expanded;
+  document.body?.classList.toggle("is-telemetry-log-expanded", expanded);
+  telemetryLogToggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (!expanded) {
+    document.documentElement.style.removeProperty("--telemetry-log-height");
+    document.body?.classList.remove("is-telemetry-log-compact");
+  }
+  updateTelemetryLogHeight();
 }
 
 function setMonochromeMode(enabled) {
@@ -227,12 +284,36 @@ function formatAge(value) {
   return `${rounded} seconds ago`;
 }
 
+function resolveAgeSeconds(ageValue, timestampIso) {
+  if (timestampIso) {
+    const computed = ageSecondsFromTimestamp(timestampIso);
+    if (computed !== null) {
+      return computed;
+    }
+  }
+  if (ageValue !== null && ageValue !== undefined && Number.isFinite(Number(ageValue))) {
+    return Number(ageValue);
+  }
+  return null;
+}
+
 function formatSeconds(value) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) {
     return "n/a";
   }
   const seconds = Math.max(0, Math.floor(Number(value)));
   return `${seconds} seconds`;
+}
+
+function renderOnicsRuntime(onics) {
+  if (!onicsRuntime || !onics) {
+    return;
+  }
+  const lastOutputAge = resolveAgeSeconds(onics.last_output_age_s, onics.last_output_iso);
+  onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
+    lastOutputAge
+  )}`;
+  setAgeSeverity(onicsRuntime, lastOutputAge);
 }
 
 function normalizeTimestamp(ts) {
@@ -818,6 +899,7 @@ function updateSnapshot(snapshot, options = {}) {
   if (!snapshot) {
     return;
   }
+  latestSnapshot = snapshot;
   if (options.fromStream) {
     setOfflineState(false);
   }
@@ -865,12 +947,7 @@ function updateSnapshot(snapshot, options = {}) {
   if (onicsState) {
     onicsState.textContent = onics.state;
   }
-  if (onicsRuntime) {
-    onicsRuntime.textContent = `SSH ${onics.ssh_connected ? "connected" : "offline"} · last output ${formatAge(
-      onics.last_output_age_s
-    )}`;
-    setAgeSeverity(onicsRuntime, onics.last_output_age_s);
-  }
+  renderOnicsRuntime(onics);
   if (startupFails) {
     const restartFails = Number.isFinite(onics.restart_failures)
       ? onics.restart_failures
@@ -1108,6 +1185,17 @@ clearBtn?.addEventListener("click", async () => {
   }
 });
 
+telemetryLogToggle?.addEventListener("click", () => {
+  setTelemetryLogExpanded(!telemetryLogExpanded);
+});
+
+telemetryLogToggle?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    setTelemetryLogExpanded(!telemetryLogExpanded);
+  }
+});
+
 serviceRestartButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const service = button.getAttribute("data-service-restart");
@@ -1183,6 +1271,10 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+window.addEventListener("resize", () => {
+  updateTelemetryLogHeight();
+});
+
 rebootBtn?.addEventListener("click", async () => {
   const shouldRestart = window.confirm(
     "Restart the vehicle now?\n\nWarning: Do not initiate a restart if the vehicle is in flight."
@@ -1213,7 +1305,7 @@ loginDismissBtn?.addEventListener("click", () => {
   loginModal?.setAttribute("aria-hidden", "true");
 });
 
-if (isDryRun) {
+if (isDryRun && !isLoadOnly) {
   dismissLoadingScreen();
   if (connectionPill) {
     connectionPill.textContent = "LINK: DRY RUN";
@@ -1222,6 +1314,18 @@ if (isDryRun) {
     connectionPill.style.borderColor = pillStyles.borderColor;
     connectionPill.style.color = pillStyles.color;
   }
+}
+
+if (isLoadOnly && connectionPill) {
+  connectionPill.textContent = "LINK: LOAD ONLY";
+  connectionStatus = "degraded";
+  const pillStyles = getConnectionPillStyles(connectionStatus);
+  connectionPill.style.borderColor = pillStyles.borderColor;
+  connectionPill.style.color = pillStyles.color;
+}
+
+if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
+  setLoadingState(true);
 }
 
 if (monochromeToggle) {
@@ -1240,39 +1344,48 @@ try {
   console.warn("Unable to read monochrome preference", err);
 }
 
-const eventSource = new EventSource("/stream");
+if (!isLoadOnly) {
+  const eventSource = new EventSource("/stream");
 
-eventSource.onopen = () => {
-  setOfflineState(false);
-};
+  eventSource.onopen = () => {
+    setOfflineState(false);
+  };
 
-eventSource.addEventListener("status", (event) => {
-  updateSnapshot(JSON.parse(event.data), { fromStream: true });
-});
+  eventSource.addEventListener("status", (event) => {
+    updateSnapshot(JSON.parse(event.data), { fromStream: true });
+  });
 
-eventSource.addEventListener("state", (event) => {
-  updateSnapshot(JSON.parse(event.data), { fromStream: true });
-});
+  eventSource.addEventListener("state", (event) => {
+    updateSnapshot(JSON.parse(event.data), { fromStream: true });
+  });
 
-eventSource.addEventListener("log", (event) => {
-  const payload = JSON.parse(event.data);
-  appendLog(payload.line);
-});
+  eventSource.addEventListener("log", (event) => {
+    const payload = JSON.parse(event.data);
+    appendLog(payload.line);
+  });
 
-eventSource.onerror = () => {
-  if (!isDryRun) {
-    setOfflineState(true);
-    connectionPill.textContent = "LINK: OFFLINE";
-    connectionStatus = "los";
-    const pillStyles = getConnectionPillStyles(connectionStatus);
-    connectionPill.style.borderColor = pillStyles.borderColor;
-    connectionPill.style.color = pillStyles.color;
+  eventSource.onerror = () => {
+    if (!isDryRun) {
+      setOfflineState(true);
+      connectionPill.textContent = "LINK: OFFLINE";
+      connectionStatus = "los";
+      const pillStyles = getConnectionPillStyles(connectionStatus);
+      connectionPill.style.borderColor = pillStyles.borderColor;
+      connectionPill.style.color = pillStyles.color;
+    }
+    if (rebootPending) {
+      rebootAwaitingLoss = false;
+      setRebootOverlay(true);
+    }
+  };
+}
+
+setInterval(() => {
+  if (!latestSnapshot) {
+    return;
   }
-  if (rebootPending) {
-    rebootAwaitingLoss = false;
-    setRebootOverlay(true);
-  }
-};
+  renderOnicsRuntime(latestSnapshot.onics);
+}, 1000);
 
 if (loadGraphs.length) {
   const resizeObserver = new ResizeObserver(() => {
@@ -1292,14 +1405,16 @@ if (loadGraphs.length) {
   }, 1000);
 }
 
-fetch("/api/snapshot")
-  .then((res) => res.json())
-  .then((snapshot) => {
-    updateSnapshot(snapshot);
-    (snapshot.logs || []).forEach((line) => {
-      parseTelemetry(line);
+if (!isLoadOnly) {
+  fetch("/api/snapshot")
+    .then((res) => res.json())
+    .then((snapshot) => {
+      updateSnapshot(snapshot);
+      (snapshot.logs || []).forEach((line) => {
+        parseTelemetry(line);
+      });
+    })
+    .catch(() => {
+      appendLog("WARNING: Unable to fetch initial snapshot.");
     });
-  })
-  .catch(() => {
-    appendLog("WARNING: Unable to fetch initial snapshot.");
-  });
+}
