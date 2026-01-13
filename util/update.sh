@@ -22,6 +22,8 @@ UPLINK_WAS_ACTIVE=""
 UPLINK_WAS_ENABLED=""
 WWAN_PRESENT=false
 WWAN_WAS_UP=false
+PISUGAR_PRESENT=false
+PISUGAR_PACKAGES=()
 
 detect_uplink_service() {
   local load_state
@@ -91,6 +93,124 @@ restore_wwan_state() {
 cleanup() {
   restore_wwan_state
   restore_uplink_state
+}
+
+detect_pisugar_packages() {
+  local filter_cmd=()
+  if command -v rg >/dev/null 2>&1; then
+    filter_cmd=(rg -i '^pisugar')
+  else
+    filter_cmd=(grep -i '^pisugar')
+  fi
+
+  if command -v dpkg-query >/dev/null 2>&1; then
+    mapfile -t PISUGAR_PACKAGES < <(dpkg-query -W -f='${Package}\n' | "${filter_cmd[@]}" || true)
+  elif command -v rpm >/dev/null 2>&1; then
+    mapfile -t PISUGAR_PACKAGES < <(rpm -qa | "${filter_cmd[@]}" || true)
+  else
+    log "Package manager not detected; skipping PiSugar package detection."
+    return
+  fi
+
+  if ((${#PISUGAR_PACKAGES[@]} > 0)); then
+    PISUGAR_PRESENT=true
+    log "Detected PiSugar packages: ${PISUGAR_PACKAGES[*]}"
+  else
+    log "No PiSugar packages detected."
+  fi
+}
+
+configure_pisugar_for_navio2() {
+  if [[ "${PISUGAR_PRESENT}" != true ]]; then
+    log "PiSugar configuration not needed; skipping."
+    return
+  fi
+
+  local config_files=(
+    "/etc/pisugar-server/config.json"
+    "/etc/pisugar-server.json"
+    "/etc/pisugar.conf"
+    "/etc/pisugar/pisugar.conf"
+  )
+  local updated=false
+  local config
+  local has_config=false
+
+  for config in "${config_files[@]}"; do
+    if [[ ! -f "${config}" ]]; then
+      continue
+    fi
+    has_config=true
+    if [[ "${config}" == *.json ]]; then
+      if ! command -v python3 >/dev/null 2>&1; then
+        log "python3 not available; skipping PiSugar JSON config update (${config})."
+        continue
+      fi
+      log "Updating PiSugar JSON config to avoid Navio2 I2C/pin conflicts: ${config}"
+      "${SUDO[@]}" python3 - "${config}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+original = json.dumps(data, sort_keys=True)
+
+def update_node(node):
+    if isinstance(node, dict):
+        for key, value in list(node.items()):
+            key_lower = key.lower()
+            if isinstance(value, (dict, list)):
+                update_node(value)
+                continue
+            if isinstance(value, str) and key_lower in {"connection", "conntype", "conn", "interface"}:
+                if value.lower() == "i2c":
+                    node[key] = "uart"
+            if isinstance(value, bool) and ("i2c" in key_lower or "gpio" in key_lower or "pin" in key_lower or "button" in key_lower):
+                node[key] = False
+    elif isinstance(node, list):
+        for entry in node:
+            update_node(entry)
+
+update_node(data)
+
+updated = json.dumps(data, sort_keys=True) != original
+if updated:
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+PY
+      updated=true
+    else
+      log "Updating PiSugar config to avoid Navio2 I2C/pin conflicts: ${config}"
+      "${SUDO[@]}" sed -i.bak \
+        -e 's/^I2C_ENABLED=.*/I2C_ENABLED=0/' \
+        -e 's/^USE_I2C=.*/USE_I2C=0/' \
+        -e 's/^GPIO_ENABLED=.*/GPIO_ENABLED=0/' \
+        -e 's/^PIN_ENABLED=.*/PIN_ENABLED=0/' \
+        "${config}" || true
+      updated=true
+    fi
+  done
+
+  if [[ "${has_config}" != true ]]; then
+    log "PiSugar packages detected but no known configuration files were found."
+    return
+  fi
+
+  if [[ "${updated}" == true ]]; then
+    local load_state
+    load_state="$(systemctl show -p LoadState --value pisugar-server.service 2>/dev/null || true)"
+    if [[ -n "${load_state}" && "${load_state}" != "not-found" ]]; then
+      if "${SUDO[@]}" systemctl is-active --quiet pisugar-server.service; then
+        log "Restarting pisugar-server.service to apply configuration changes."
+        "${SUDO[@]}" systemctl restart pisugar-server.service
+      else
+        log "pisugar-server.service is not active; skipping restart."
+      fi
+    fi
+  fi
 }
 
 check_non_wwan_internet() {
@@ -181,6 +301,7 @@ main() {
   require_command systemctl
   check_non_wwan_internet
   detect_uplink_service
+  detect_pisugar_packages
   record_uplink_state
   record_wwan_state
   trap '' HUP
@@ -205,6 +326,7 @@ main() {
   update_repo
   ensure_scripts_executable
   update_system_packages
+  configure_pisugar_for_navio2
   prompt_service_replacement
   log "Update routine completed."
 }
