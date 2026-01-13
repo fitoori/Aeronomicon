@@ -105,6 +105,8 @@ APRILTAG_FAMILY = 'tagStandard41h12'
 tag_landing_id = 113
 tag_landing_size = 0.144     # meters (edge length incl. border)
 tag_image_source = "right"   # T265 supports "left" or "right"
+legacy_tag_lost_us = 2_000_000
+legacy_tag_max_alt = 10.0
 
 # Shutdown event (set on SIGTERM/SIGINT)
 shutdown_event = threading.Event()
@@ -122,6 +124,8 @@ parser.add_argument('--scale_calib_enable', type=bool, help="Scale calibration (
 parser.add_argument('--camera_orientation', type=int,
                     help="Camera orientation: 0=forward/right-USB, 1=down/right-USB")
 parser.add_argument('--debug_enable', type=int, help="Enable debug print (1 to enable).")
+parser.add_argument('--legacy', action='store_true',
+                    help="Use legacy AprilTag handling from t265_precland_apriltags.py.")
 args = parser.parse_args()
 
 # Helper: coalesce None to default but keep falsy numeric values like 0
@@ -151,6 +155,7 @@ confidence_msg_hz      = _validate_positive_rate("confidence_msg_hz", args.confi
 scale_calib_enable     = bool(args.scale_calib_enable) if args.scale_calib_enable is not None else False
 camera_orientation     = coalesce(args.camera_orientation, camera_orientation_default)
 debug_enable           = 1 if (args.debug_enable and int(args.debug_enable) == 1) else 0
+legacy_mode            = bool(args.legacy)
 
 print(f"INFO: Using connection_string: {connection_string}")
 print(f"INFO: Using connection_baudrate: {connection_baudrate}")
@@ -158,6 +163,7 @@ print(f"INFO: Using vision_msg_hz: {vision_msg_hz}")
 print(f"INFO: Using landing_target_msg_hz: {landing_target_msg_hz}")
 print(f"INFO: Using confidence_msg_hz: {confidence_msg_hz}")
 print(f"INFO: T265 orientation: {camera_orientation} (0=forward/right-USB, 1=down/right-USB)")
+print(f"INFO: AprilTag legacy mode: {'Enabled' if legacy_mode else 'Disabled'}")
 print("INFO: Camera position offset:", "Enabled" if body_offset_enabled else "Disabled",
       f"({body_offset_x}, {body_offset_y}, {body_offset_z})")
 print("INFO: Compass:", "Enabled (north-aligned yaw)" if compass_enabled else "Disabled")
@@ -230,7 +236,12 @@ def create_apriltag_detector():
         return None
 
 
-at_detector = create_apriltag_detector()
+at_detector = None
+legacy_detector = None
+if legacy_mode:
+    legacy_detector = apriltags3.Detector(families=APRILTAG_FAMILY)
+else:
+    at_detector = create_apriltag_detector()
 
 
 def _detect_apriltags(frames, camera_params, image_source):
@@ -580,6 +591,8 @@ H_aeroRef_aeroBody = None
 H_camera_tag = None
 is_landing_tag_detected = False
 heading_north_yaw = None
+landing_override = False
+last_tag_us = 0
 
 # ------------------------------
 # Performance tracking & dynamic pose rate
@@ -851,33 +864,66 @@ try:
                 break
             continue
 
-        # AprilTag detection (legacy-style raw frame + native pose estimation)
-        tags = _detect_apriltags(frame_copy, raw_camera_params, tag_image_source)
+        if legacy_mode:
+            alt = 0.0
+            if vehicle is not None:
+                try:
+                    alt = vehicle.location.global_relative_frame.alt or 0.0
+                except Exception:
+                    alt = 0.0
 
-        is_landing_tag_detected = False
-        H_camera_tag = None
+            now_us = int(round(time.time() * 1e6))
+            if landing_override and now_us - last_tag_us > legacy_tag_lost_us:
+                landing_override = False
+                print("INFO: Tag lost – override cancelled")
 
-        if tags:
-            for tag in tags:
-                if int(tag.tag_id) == int(tag_landing_id):
-                    pose_t = getattr(tag, "pose_t", None)
-                    if pose_t is None:
-                        print("WARN: Landing tag detected but pose translation is unavailable.")
-                        break
+            # ---- April-Tag detection up to 10 m
+            H_camera_tag = None
+            is_landing_tag_detected = False
+            if alt <= legacy_tag_max_alt:
+                img = frames.get_fisheye_frame(2)
+                if img:
+                    tags = legacy_detector.detect(np.asanyarray(img.get_data()),
+                                                  True, [285, 285, 160, 160], tag_landing_size)
+                    for tag in tags:
+                        if tag.tag_id == tag_landing_id:
+                            last_tag_us = now_us
+                            if not landing_override:
+                                print("INFO: Landing tag detected – override ON")
+                            landing_override = True
+                            mat = tf.euler_matrix(0, 0, 0, 'sxyz')
+                            mat[0:3, 3] = tag.pose_t
+                            H_camera_tag = mat
+                            is_landing_tag_detected = True
+                            break
+        else:
+            # AprilTag detection (legacy-style raw frame + native pose estimation)
+            tags = _detect_apriltags(frame_copy, raw_camera_params, tag_image_source)
 
-                    pose_t_vec = np.asarray(pose_t, dtype=float).reshape(-1)
-                    if pose_t_vec.size < 3 or not np.all(np.isfinite(pose_t_vec[:3])):
-                        print(f"WARN: Landing tag pose translation invalid: {pose_t!r}")
-                        break
+            is_landing_tag_detected = False
+            H_camera_tag = None
 
-                    is_landing_tag_detected = True
-                    H_camera_tag = tf.euler_matrix(0, 0, 0, 'sxyz')
-                    H_camera_tag[0][3] = float(pose_t_vec[0])
-                    H_camera_tag[1][3] = float(pose_t_vec[1])
-                    H_camera_tag[2][3] = float(pose_t_vec[2])
-                    print(f"INFO: Detected landing tag {tag.tag_id} relative to T265 at "
-                          f"x:{H_camera_tag[0][3]:.3f}, y:{H_camera_tag[1][3]:.3f}, z:{H_camera_tag[2][3]:.3f}")
-                    break  # Only care about the landing tag
+            if tags:
+                for tag in tags:
+                    if int(tag.tag_id) == int(tag_landing_id):
+                        pose_t = getattr(tag, "pose_t", None)
+                        if pose_t is None:
+                            print("WARN: Landing tag detected but pose translation is unavailable.")
+                            break
+
+                        pose_t_vec = np.asarray(pose_t, dtype=float).reshape(-1)
+                        if pose_t_vec.size < 3 or not np.all(np.isfinite(pose_t_vec[:3])):
+                            print(f"WARN: Landing tag pose translation invalid: {pose_t!r}")
+                            break
+
+                        is_landing_tag_detected = True
+                        H_camera_tag = tf.euler_matrix(0, 0, 0, 'sxyz')
+                        H_camera_tag[0][3] = float(pose_t_vec[0])
+                        H_camera_tag[1][3] = float(pose_t_vec[1])
+                        H_camera_tag[2][3] = float(pose_t_vec[2])
+                        print(f"INFO: Detected landing tag {tag.tag_id} relative to T265 at "
+                              f"x:{H_camera_tag[0][3]:.3f}, y:{H_camera_tag[1][3]:.3f}, z:{H_camera_tag[2][3]:.3f}")
+                        break  # Only care about the landing tag
 
         # ---- Update performance metrics at end of loop ----
         iter_end = time.time()
