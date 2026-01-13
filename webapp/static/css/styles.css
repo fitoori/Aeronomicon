@@ -315,6 +315,10 @@ body.is-loading {
   min-height: 300px;
 }
 
+body.is-telemetry-log-expanded #telemetry-panel {
+  min-height: 0;
+}
+
 .panel__header {
   padding: 14px 18px 6px;
 }
@@ -360,6 +364,18 @@ body.is-loading {
 
 .telemetry-log__title:hover {
   color: #d1fae5;
+}
+
+body.is-telemetry-log-compact #telemetry-panel .panel__header {
+  padding: 4px 18px 2px;
+}
+
+body.is-telemetry-log-compact #telemetry-panel .panel__body {
+  padding: 0 18px 4px;
+}
+
+body.is-telemetry-log-compact #telemetry-panel .log-view {
+  padding: 0;
 }
 
 .panel__header p {

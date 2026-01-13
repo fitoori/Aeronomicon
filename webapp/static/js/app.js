@@ -74,6 +74,8 @@ const isLoadOnly =
   document.body?.dataset.loadOnly === "true" ||
   ["1", "true", "yes", "on"].includes(loadOnlyParam);
 
+const MIN_TELEMETRY_LOG_HEIGHT = 0;
+
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
@@ -127,6 +129,24 @@ function updateTelemetryLogHeight() {
   if (!telemetryLogExpanded || !logView) {
     return;
   }
+  const documentElement = document.documentElement;
+  const applyHeight = () => {
+    const rect = logView.getBoundingClientRect();
+    const slack = documentElement.clientHeight - documentElement.scrollHeight;
+    document.body?.classList.toggle("is-telemetry-log-compact", slack < 0);
+    const height = Math.max(MIN_TELEMETRY_LOG_HEIGHT, Math.floor(rect.height + slack));
+    documentElement.style.setProperty("--telemetry-log-height", `${height}px`);
+  };
+  applyHeight();
+  requestAnimationFrame(() => {
+    if (!telemetryLogExpanded || !logView) {
+      return;
+    }
+    const slack = documentElement.clientHeight - documentElement.scrollHeight;
+    if (Math.abs(slack) > 1) {
+      applyHeight();
+    }
+  });
   const rect = logView.getBoundingClientRect();
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
   const padding = 24;
@@ -140,6 +160,7 @@ function setTelemetryLogExpanded(expanded) {
   telemetryLogToggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
   if (!expanded) {
     document.documentElement.style.removeProperty("--telemetry-log-height");
+    document.body?.classList.remove("is-telemetry-log-compact");
   }
   updateTelemetryLogHeight();
 }
