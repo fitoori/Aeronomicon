@@ -203,8 +203,12 @@ PY
     local load_state
     load_state="$(systemctl show -p LoadState --value pisugar-server.service 2>/dev/null || true)"
     if [[ -n "${load_state}" && "${load_state}" != "not-found" ]]; then
-      log "Restarting pisugar-server.service to apply configuration changes."
-      "${SUDO[@]}" systemctl restart pisugar-server.service
+      if "${SUDO[@]}" systemctl is-active --quiet pisugar-server.service; then
+        log "Restarting pisugar-server.service to apply configuration changes."
+        "${SUDO[@]}" systemctl restart pisugar-server.service
+      else
+        log "pisugar-server.service is not active; skipping restart."
+      fi
     fi
   fi
 }
