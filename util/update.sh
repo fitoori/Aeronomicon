@@ -1,9 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-log()  { echo "[update] $*"; }
-warn() { echo "[update][WARN] $*" >&2; }
-die()  { echo "[update][ERROR] $*" >&2; exit 1; }
+DIAG_FILE=""
+
+init_diag_log() {
+  local dir="/var/log/aeronomicon"
+  "${SUDO[@]}" mkdir -p "${dir}" || true
+  DIAG_FILE="${dir}/update-pisugar-$(date +%Y%m%d%H%M%S).log"
+  "${SUDO[@]}" touch "${DIAG_FILE}" || true
+  "${SUDO[@]}" chmod 0644 "${DIAG_FILE}" || true
+  log "PiSugar diagnostic log: ${DIAG_FILE}"
+}
+
+log_to_diag() {
+  # Best-effort append to diag file; never fail update because logging failed.
+  local line="$1"
+  if [[ -n "${DIAG_FILE}" ]]; then
+    printf '%s\n' "${line}" | "${SUDO[@]}" tee -a "${DIAG_FILE}" >/dev/null 2>&1 || true
+  fi
+}
+
+log()  { local m="[update] $*"; echo "${m}"; log_to_diag "${m}"; }
+warn() { local m="[update][WARN] $*"; echo "${m}" >&2; log_to_diag "${m}"; }
+die()  { local m="[update][ERROR] $*"; echo "${m}" >&2; log_to_diag "${m}"; exit 1; }
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -27,7 +46,6 @@ WWAN_PRESENT=false
 WWAN_WAS_UP=false
 
 # PiSugar runtime state
-PISUGAR_SOFTWARE_AVAILABLE=false   # pisugar-server service present
 PISUGAR_VALIDATED=false           # end-to-end validated via pisugar-server
 PISUGAR_MODEL=""
 PISUGAR_I2C_BUS=""
@@ -192,30 +210,33 @@ update_system_packages() {
   "${SUDO[@]}" apt-get autoremove -y
 }
 
+ensure_apt_pkg() {
+  local pkg="$1"
+  if command -v dpkg >/dev/null 2>&1; then
+    if ! dpkg -s "${pkg}" >/dev/null 2>&1; then
+      log "Installing required package: ${pkg}"
+      "${SUDO[@]}" apt-get update
+      "${SUDO[@]}" apt-get install -y "${pkg}"
+    fi
+  else
+    warn "dpkg not available; cannot ensure package ${pkg}"
+  fi
+}
+
+dump_cmd() {
+  # Usage: dump_cmd "title" cmd args...
+  local title="$1"; shift
+  log "---- ${title} ----"
+  log_to_diag "---- ${title} ----"
+  # shellcheck disable=SC2068
+  ( "$@" 2>&1 || true ) | while IFS= read -r line; do
+    log_to_diag "${line}"
+  done
+  # Also print short to console if useful:
+  "$@" 2>/dev/null || true
+}
+
 # --- PiSugar support ---------------------------------------------------------
-
-detect_pisugar_server() {
-  local load_state
-  load_state="$(systemctl show -p LoadState --value pisugar-server.service 2>/dev/null || true)"
-  if [[ -n "${load_state}" && "${load_state}" != "not-found" ]]; then
-    PISUGAR_SOFTWARE_AVAILABLE=true
-    return
-  fi
-
-  # Some installs may register without ".service" in user docs; systemd resolves it,
-  # but we keep the explicit check above.
-  PISUGAR_SOFTWARE_AVAILABLE=false
-}
-
-ensure_i2c_tools() {
-  # Only needed for the explicit I2C validation scan.
-  if command -v i2cdetect >/dev/null 2>&1; then
-    return
-  fi
-  log "Installing i2c-tools (required for PiSugar I2C validation)."
-  "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y i2c-tools
-}
 
 enable_soft_i2c_bus_if_vehicle() {
   # Your original script tried to force-enable a software I2C bus.
@@ -253,13 +274,182 @@ enable_soft_i2c_bus_if_vehicle() {
   "${SUDO[@]}" raspi-config nonint do_i2c 0 || warn "raspi-config I2C enablement step returned non-zero."
 }
 
+ensure_kernel_i2c_modules() {
+  "${SUDO[@]}" modprobe i2c-dev >/dev/null 2>&1 || true
+  # Different kernels name these differently; harmless if missing.
+  "${SUDO[@]}" modprobe i2c-bcm2835 >/dev/null 2>&1 || true
+  "${SUDO[@]}" modprobe i2c-bcm2708 >/dev/null 2>&1 || true
+}
+
+boot_config_enable_i2c_arm() {
+  local cfg="/boot/config.txt"
+  [[ -f "${cfg}" ]] || { warn "${cfg} not found; cannot persistently enable I2C"; return 1; }
+
+  local changed=false
+  if grep -Eq '^\s*dtparam=i2c_arm=on\b' "${cfg}"; then
+    :
+  else
+    # Flip off->on if present, otherwise append.
+    if grep -Eq '^\s*dtparam=i2c_arm=off\b' "${cfg}"; then
+      log "Setting dtparam=i2c_arm=on in ${cfg}"
+      "${SUDO[@]}" cp "${cfg}" "${cfg}.bak.$(date +%Y%m%d%H%M%S)"
+      "${SUDO[@]}" sed -i 's/^\s*dtparam=i2c_arm=off\b/dtparam=i2c_arm=on/' "${cfg}"
+      changed=true
+    else
+      log "Appending dtparam=i2c_arm=on to ${cfg}"
+      "${SUDO[@]}" cp "${cfg}" "${cfg}.bak.$(date +%Y%m%d%H%M%S)"
+      printf '%s\n' "dtparam=i2c_arm=on" | "${SUDO[@]}" tee -a "${cfg}" >/dev/null
+      changed=true
+    fi
+  fi
+
+  if [[ "${changed}" == true ]]; then
+    echo "BOOTCFG_CHANGED"
+  fi
+}
+
+ensure_i2c_runtime_ready_or_reboot() {
+  # Returns:
+  #   0: runtime I2C is ready (at least /dev/i2c-1 exists)
+  #   2: changes were made that require reboot (I2C not active yet)
+  #
+  ensure_apt_pkg i2c-tools
+  ensure_kernel_i2c_modules
+
+  if [[ -e /dev/i2c-1 ]]; then
+    return 0
+  fi
+
+  # Try enabling via raspi-config (persistent) + config.txt fix.
+  if command -v raspi-config >/dev/null 2>&1; then
+    log "Enabling I2C via raspi-config (persistent)."
+    "${SUDO[@]}" raspi-config nonint do_i2c 0 || warn "raspi-config do_i2c failed (continuing)."
+  else
+    warn "raspi-config not found; will only edit /boot/config.txt."
+  fi
+
+  boot_config_enable_i2c_arm || true
+  ensure_kernel_i2c_modules
+
+  # If still not present, reboot is required for DT changes to take effect.
+  if [[ ! -e /dev/i2c-1 ]]; then
+    log "I2C device node /dev/i2c-1 not present after enablement. Reboot required."
+    return 2
+  fi
+
+  # If boot config changed but device node exists now, it might still be prudent to reboot,
+  # but we do not force it.
+  return 0
+}
+
+i2c_scan_all_busses() {
+  ensure_apt_pkg i2c-tools
+  ensure_kernel_i2c_modules
+
+  local dev bus
+  shopt -s nullglob
+  for dev in /dev/i2c-*; do
+    bus="${dev##*/i2c-}"
+    log "I2C scan: bus ${bus} (${dev})"
+    log_to_diag "i2cdetect -y ${bus}"
+    "${SUDO[@]}" i2cdetect -y "${bus}" 2>&1 | tee -a /dev/null | while IFS= read -r line; do
+      log_to_diag "${line}"
+    done
+  done
+  shopt -u nullglob
+}
+
+find_pisugar3_bus() {
+  # PiSugar 3 Power Manager occupies 0x57 & 0x68.
+  # We treat presence of 0x57 as the primary indicator.
+  local dev bus scan
+  shopt -s nullglob
+  for dev in /dev/i2c-*; do
+    bus="${dev##*/i2c-}"
+    scan="$("${SUDO[@]}" i2cdetect -y "${bus}" 2>/dev/null || true)"
+    if echo "${scan}" | grep -qw "57"; then
+      echo "${bus}"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+  return 1
+}
+
+pisugar_server_user() {
+  local u
+  u="$(systemctl show -p User --value pisugar-server.service 2>/dev/null || true)"
+  # Empty means root in many units; normalize.
+  if [[ -z "${u}" || "${u}" == "root" || "${u}" == "0" ]]; then
+    echo "root"
+  else
+    echo "${u}"
+  fi
+}
+
+ensure_pisugar_service_i2c_permissions() {
+  local u
+  u="$(pisugar_server_user)"
+  log "pisugar-server.service User=${u}"
+
+  if [[ "${u}" == "root" ]]; then
+    return 0
+  fi
+
+  if ! getent group i2c >/dev/null 2>&1; then
+    warn "Group 'i2c' not found on this system; cannot grant ${u} I2C access via groups."
+    return 0
+  fi
+
+  if id -nG "${u}" 2>/dev/null | tr ' ' '\n' | grep -qx "i2c"; then
+    return 0
+  fi
+
+  log "Adding ${u} to group i2c (required to access /dev/i2c-*)."
+  "${SUDO[@]}" usermod -a -G i2c "${u}" || warn "usermod failed; service may still lack I2C permissions."
+}
+
+update_pisugar_config_json_bus() {
+  local bus="$1"
+  local cfg="/etc/pisugar-server/config.json"
+
+  if [[ ! -f "${cfg}" ]]; then
+    warn "${cfg} not found; skipping i2c_bus fix."
+    return 0
+  fi
+
+  ensure_apt_pkg python3
+
+  log "Setting i2c_bus=${bus} in ${cfg}"
+  "${SUDO[@]}" cp "${cfg}" "${cfg}.bak.$(date +%Y%m%d%H%M%S)"
+  "${SUDO[@]}" python3 - "${cfg}" "${bus}" <<'PY'
+import json, sys
+path=sys.argv[1]
+bus=int(sys.argv[2])
+with open(path,"r",encoding="utf-8") as f:
+    data=json.load(f)
+data["i2c_bus"]=bus
+with open(path,"w",encoding="utf-8") as f:
+    json.dump(data,f,indent=2)
+    f.write("\n")
+PY
+}
+
+restart_pisugar_server() {
+  log "Restarting pisugar-server.service"
+  "${SUDO[@]}" systemctl restart pisugar-server.service || true
+  "${SUDO[@]}" systemctl --no-pager --full status pisugar-server.service >/dev/null 2>&1 || true
+}
+
 detect_pisugar_i2c_bus_and_model() {
   # Uses PiSugar official expected addresses:
   # - PiSugar2: 0x75 & 0x32
   # - PiSugar3: 0x57 & 0x68
   #
   # We scan all /dev/i2c-* busses that exist.
-  ensure_i2c_tools
+  ensure_apt_pkg i2c-tools
+  ensure_kernel_i2c_modules
 
   local dev bus scan has32 has75 has57 has68
   PISUGAR_I2C_BUS=""
@@ -292,12 +482,7 @@ detect_pisugar_i2c_bus_and_model() {
 }
 
 pisugar_cmd() {
-  # Prefer UDS (/tmp/pisugar-server.sock). Fallback to TCP 127.0.0.1:8423.
-  # Per PiSugar docs, both are supported and expose commands like:
-  #   get battery
-  #   get rtc_time
-  #   rtc_rtc2pi / rtc_pi2rtc / rtc_web
-  # 
+  # UDS preferred, TCP fallback. Commands are documented (get battery/get model).
   local cmd="$1"
   local out=""
 
@@ -305,96 +490,178 @@ pisugar_cmd() {
     if command -v python3 >/dev/null 2>&1; then
       out="$("${SUDO[@]}" python3 - "${cmd}" <<'PY'
 import socket, sys
-cmd = (sys.argv[1] + "\n").encode("utf-8", errors="ignore")
-s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+cmd=(sys.argv[1]+"\n").encode()
+s=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.settimeout(1.5)
 s.connect("/tmp/pisugar-server.sock")
 s.sendall(cmd)
-chunks = []
+chunks=[]
 while True:
   try:
-    data = s.recv(4096)
-    if not data:
-      break
-    chunks.append(data)
+    d=s.recv(4096)
+    if not d: break
+    chunks.append(d)
   except socket.timeout:
     break
 s.close()
-sys.stdout.write(b"".join(chunks).decode("utf-8", errors="ignore"))
+print(b"".join(chunks).decode(errors="ignore"), end="")
 PY
 )"
-    elif command -v nc >/dev/null 2>&1; then
-      # Use a hard timeout to avoid hanging if server keeps connection open.
-      out="$(printf '%s\n' "${cmd}" | "${SUDO[@]}" timeout 2s nc -U /tmp/pisugar-server.sock 2>/dev/null || true)"
     else
-      die "PiSugar UDS present but neither python3 nor nc available to query it."
+      out="$(printf '%s\n' "${cmd}" | "${SUDO[@]}" timeout 2s nc -U /tmp/pisugar-server.sock 2>/dev/null || true)"
     fi
   else
     if command -v python3 >/dev/null 2>&1; then
       out="$("${SUDO[@]}" python3 - "${cmd}" <<'PY'
 import socket, sys
-cmd = (sys.argv[1] + "\n").encode("utf-8", errors="ignore")
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+cmd=(sys.argv[1]+"\n").encode()
+s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(1.5)
 s.connect(("127.0.0.1", 8423))
 s.sendall(cmd)
-chunks = []
+chunks=[]
 while True:
   try:
-    data = s.recv(4096)
-    if not data:
-      break
-    chunks.append(data)
+    d=s.recv(4096)
+    if not d: break
+    chunks.append(d)
   except socket.timeout:
     break
 s.close()
-sys.stdout.write(b"".join(chunks).decode("utf-8", errors="ignore"))
+print(b"".join(chunks).decode(errors="ignore"), end="")
 PY
 )"
-    elif command -v nc >/dev/null 2>&1; then
-      out="$(printf '%s\n' "${cmd}" | "${SUDO[@]}" timeout 2s nc -q 0 127.0.0.1 8423 2>/dev/null || true)"
     else
-      die "Neither python3 nor nc available to query PiSugar TCP API on 127.0.0.1:8423."
+      out="$(printf '%s\n' "${cmd}" | "${SUDO[@]}" timeout 2s nc -q 0 127.0.0.1 8423 2>/dev/null || true)"
     fi
   fi
 
-  # Normalize whitespace a bit
   echo "${out}" | sed -e 's/\r$//' | sed -e '/^[[:space:]]*$/d'
+}
+
+pisugar_health_check() {
+  # Returns 0 only if battery is numeric and rtc_time is parseable.
+  local battery_out pct rtc_out rtc_str
+
+  battery_out="$(pisugar_cmd "get battery" || true)"
+  pct="$(echo "${battery_out}" | awk -F': ' '/^battery:/{print $2; exit}' || true)"
+
+  # reject "I2C not connected"
+  if [[ -z "${pct}" || ! "${pct}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    return 1
+  fi
+
+  rtc_out="$(pisugar_cmd "get rtc_time" || true)"
+  rtc_str="$(echo "${rtc_out}" | awk -F': ' '/^rtc_time:/{print $2; exit}' || true)"
+  if [[ -z "${rtc_str}" ]]; then
+    return 1
+  fi
+  if ! date -d "${rtc_str}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  PISUGAR_BATTERY_PCT="${pct}"
+  return 0
+}
+
+pisugar_collect_failure_bundle() {
+  log "Collecting PiSugar failure diagnostics (see ${DIAG_FILE})."
+  dump_cmd "OS release" bash -c 'cat /etc/os-release'
+  dump_cmd "Kernel" uname -a
+  dump_cmd "I2C dev nodes" bash -c 'ls -l /dev/i2c-* 2>/dev/null || true'
+  dump_cmd "Loaded I2C modules" bash -c 'lsmod | grep -i i2c || true'
+  dump_cmd "boot config i2c lines" bash -c "grep -nE '^(dtparam=i2c|dtoverlay=.*i2c)' /boot/config.txt 2>/dev/null || true"
+  dump_cmd "pisugar-server unit" systemctl cat pisugar-server.service
+  dump_cmd "pisugar-server recent logs" bash -c 'journalctl -u pisugar-server.service -n 120 --no-pager || true'
+  i2c_scan_all_busses
+  dump_cmd "pisugar get model" bash -c 'echo "get model" | nc -U -q 0 /tmp/pisugar-server.sock 2>/dev/null || true'
+  dump_cmd "pisugar get battery" bash -c 'echo "get battery" | nc -U -q 0 /tmp/pisugar-server.sock 2>/dev/null || true'
+  dump_cmd "pisugar get rtc_time" bash -c 'echo "get rtc_time" | nc -U -q 0 /tmp/pisugar-server.sock 2>/dev/null || true'
+}
+
+pisugar_repair_and_validate() {
+  [[ "${FULL_UPDATE}" == true ]] || return 0
+
+  init_diag_log
+
+  # Ensure service exists
+  local load_state
+  load_state="$(systemctl show -p LoadState --value pisugar-server.service 2>/dev/null || true)"
+  [[ -n "${load_state}" && "${load_state}" != "not-found" ]] || die "pisugar-server.service not installed on WATNE."
+
+  # Start service (if stopped)
+  "${SUDO[@]}" systemctl start pisugar-server.service || true
+
+  # If already healthy, done.
+  if pisugar_health_check; then
+    log "PiSugar OK. Battery=${PISUGAR_BATTERY_PCT}%"
+    return 0
+  fi
+
+  log "PiSugar reports I2C failure (e.g., 'I2C not connected'). Starting software remediation."
+
+  # 1) Ensure runtime I2C exists; if not, enable and require reboot.
+  local i2c_state
+  if ! i2c_state="$(ensure_i2c_runtime_ready_or_reboot; echo $?)"; then
+    :
+  fi
+  if [[ "${i2c_state}" == "2" ]]; then
+    pisugar_collect_failure_bundle
+    warn "I2C was enabled in boot config but is not active yet. Reboot is required to bring up /dev/i2c-1."
+
+    local response="n"
+    if [[ -r /dev/tty ]]; then
+      read -r -p "Reboot now to activate I2C and retry PiSugar validation? [y/N] " response </dev/tty || response="n"
+    fi
+    if [[ "${response}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+      log "Rebooting now (required for I2C activation). Re-run update after boot."
+      "${SUDO[@]}" shutdown -r now "Reboot required to activate I2C for PiSugar"
+      exit 0
+    fi
+    die "Cannot proceed on WATNE until I2C is active and PiSugar is readable."
+  fi
+
+  # 2) Ensure pisugar-server has I2C permissions.
+  ensure_pisugar_service_i2c_permissions
+
+  # 3) Find which I2C bus has PiSugar (0x57 expected).
+  local bus
+  bus="$(find_pisugar3_bus || true)"
+  if [[ -z "${bus}" ]]; then
+    pisugar_collect_failure_bundle
+    die "PiSugar3 I2C address 0x57 not detected on any /dev/i2c-* bus. Software remediation exhausted."
+  fi
+  log "Detected PiSugar3 on I2C bus ${bus} (0x57 present)."
+
+  # 4) Force pisugar-server config to use that bus (i2c_bus is supported in config.json).
+  update_pisugar_config_json_bus "${bus}"
+
+  # 5) Restart service and re-check health.
+  restart_pisugar_server
+  if pisugar_health_check; then
+    log "PiSugar restored. Battery=${PISUGAR_BATTERY_PCT}%"
+    return 0
+  fi
+
+  # Final: diagnostics + fail hard.
+  pisugar_collect_failure_bundle
+  die "PiSugar still reports I2C failure after remediation. See ${DIAG_FILE} for full diagnostics."
 }
 
 ensure_pisugar_validated() {
   # On WATNE we treat PiSugar verification as REQUIRED.
   [[ "${FULL_UPDATE}" == true ]] || return 0
 
-  detect_pisugar_server
-  if [[ "${PISUGAR_SOFTWARE_AVAILABLE}" != true ]]; then
-    die "pisugar-server.service not found, but WATNE expects PiSugar telemetry/RTC support."
-  fi
+  pisugar_repair_and_validate
 
-  log "Ensuring pisugar-server is active."
-  "${SUDO[@]}" systemctl start pisugar-server.service || true
-
-  # Verify the command interface returns sane responses
-  local model_out battery_out rtc_out
+  local model_out
   model_out="$(pisugar_cmd "get model" || true)"
-  battery_out="$(pisugar_cmd "get battery" || true)"
-  rtc_out="$(pisugar_cmd "get rtc_time" || true)"
-
-  if ! echo "${battery_out}" | grep -q "^battery:"; then
-    die "PiSugar validation failed: 'get battery' did not return expected output. Output was: ${battery_out}"
-  fi
-  if ! echo "${rtc_out}" | grep -q "^rtc_time:"; then
-    die "PiSugar validation failed: 'get rtc_time' did not return expected output. Output was: ${rtc_out}"
-  fi
-
   PISUGAR_MODEL="$(echo "${model_out}" | sed -n 's/^model:[[:space:]]*//p' | head -n1 || true)"
   if [[ -z "${PISUGAR_MODEL}" ]]; then
     PISUGAR_MODEL="(unknown model string)"
   fi
 
-  PISUGAR_BATTERY_PCT="$(echo "${battery_out}" | awk -F': ' '/^battery:/{print $2}' | head -n1 || true)"
   PISUGAR_VALIDATED=true
-
   log "PiSugar server validated. Model: ${PISUGAR_MODEL}. Battery: ${PISUGAR_BATTERY_PCT}%."
 }
 
@@ -531,4 +798,3 @@ main() {
 }
 
 main "$@"
-
