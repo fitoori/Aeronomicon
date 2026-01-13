@@ -472,6 +472,35 @@ class OnicsController:
             self._runtime.last_output_iso = ts
         self._broker.publish("log", {"line": full, "ts": now_ms()})
 
+    def _emit_diagnostics(self, reason: str, exit_status: Optional[int] = None) -> None:
+        try:
+            snapshot = self.snapshot(include_logs=False, include_ages=True)
+        except Exception as exc:
+            self._append_log(f"DIAGNOSTICS ERROR: {type(exc).__name__}: {exc}")
+            return
+
+        transport_active = False
+        channel_open = False
+        channel_exit_ready = False
+        with self._lock:
+            transport_active = bool(self._ssh_transport and self._ssh_transport.is_active())
+            if self._chan is not None:
+                channel_open = not self._chan.closed
+                channel_exit_ready = self._chan.exit_status_ready()
+
+        diagnostic_payload = {
+            "reason": reason,
+            "exit_status": exit_status,
+            "transport_active": transport_active,
+            "channel_open": channel_open,
+            "channel_exit_ready": channel_exit_ready,
+            "snapshot": snapshot,
+        }
+
+        self._append_log("DIAGNOSTICS START")
+        self._append_log(f"DIAGNOSTICS PAYLOAD: {safe_json_dumps(diagnostic_payload)}")
+        self._append_log("DIAGNOSTICS END")
+
     def clear_logs(self) -> None:
         with self._lock:
             self._logs.clear()
@@ -1766,6 +1795,7 @@ class OnicsController:
                 self._set_state("IDLE")
             else:
                 self._append_log(f"ONICS-T EXITED (unexpected). exit_status={exit_status}")
+                self._emit_diagnostics("unexpected_exit", exit_status=exit_status)
                 self._set_state("LOS", "ONICS-T ended unexpectedly or SSH stream terminated")
                 self._schedule_auto_restart("unexpected exit")
 
