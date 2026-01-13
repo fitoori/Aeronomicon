@@ -857,11 +857,21 @@ try:
         if tags:
             for tag in tags:
                 if int(tag.tag_id) == int(tag_landing_id):
+                    pose_t = getattr(tag, "pose_t", None)
+                    if pose_t is None:
+                        print("WARN: Landing tag detected but pose translation is unavailable.")
+                        break
+
+                    pose_t_vec = np.asarray(pose_t, dtype=float).reshape(-1)
+                    if pose_t_vec.size < 3 or not np.all(np.isfinite(pose_t_vec[:3])):
+                        print(f"WARN: Landing tag pose translation invalid: {pose_t!r}")
+                        break
+
                     is_landing_tag_detected = True
                     H_camera_tag = tf.euler_matrix(0, 0, 0, 'sxyz')
-                    H_camera_tag[0][3] = float(tag.pose_t[0])
-                    H_camera_tag[1][3] = float(tag.pose_t[1])
-                    H_camera_tag[2][3] = float(tag.pose_t[2])
+                    H_camera_tag[0][3] = float(pose_t_vec[0])
+                    H_camera_tag[1][3] = float(pose_t_vec[1])
+                    H_camera_tag[2][3] = float(pose_t_vec[2])
                     print(f"INFO: Detected landing tag {tag.tag_id} relative to T265 at "
                           f"x:{H_camera_tag[0][3]:.3f}, y:{H_camera_tag[1][3]:.3f}, z:{H_camera_tag[2][3]:.3f}")
                     break  # Only care about the landing tag
