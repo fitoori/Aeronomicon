@@ -45,6 +45,8 @@ UPLINK_WAS_ENABLED=""
 WWAN_PRESENT=false
 WWAN_WAS_UP=false
 
+PLYMOUTH_AVAILABLE=false
+
 # PiSugar runtime state
 PISUGAR_VALIDATED=false           # end-to-end validated via pisugar-server
 PISUGAR_MODEL=""
@@ -73,6 +75,22 @@ detect_uplink_service() {
   load_state="$(systemctl show -p LoadState --value uplink.service 2>/dev/null || true)"
   if [[ -n "${load_state}" && "${load_state}" != "not-found" ]]; then
     UPLINK_AVAILABLE=true
+  fi
+}
+
+detect_plymouth() {
+  if command -v plymouthd >/dev/null 2>&1; then
+    PLYMOUTH_AVAILABLE=true
+    return
+  fi
+  if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+    PLYMOUTH_AVAILABLE=true
+    return
+  fi
+  if command -v dpkg >/dev/null 2>&1; then
+    if dpkg -s plymouth >/dev/null 2>&1; then
+      PLYMOUTH_AVAILABLE=true
+    fi
   fi
 }
 
@@ -199,6 +217,36 @@ run_installer_update() {
   [[ -x "${installer}" ]] || die "Installer not found or not executable: ${installer}"
   log "Running installer in update mode."
   "${SUDO[@]}" bash -c "cd '${REPO_DIR}' && exec '${installer}' --update"
+}
+
+run_plymouth_installer() {
+  local installer="${REPO_DIR}/util/plymouth/install.sh"
+  [[ -x "${installer}" ]] || die "Plymouth installer not found or not executable: ${installer}"
+  log "Installing Plymouth boot theme."
+  "${SUDO[@]}" bash -c "cd '${REPO_DIR}' && exec '${installer}'"
+}
+
+prompt_plymouth_install() {
+  if [[ "${PLYMOUTH_AVAILABLE}" != true ]]; then
+    log "Plymouth not detected; skipping boot theme install offer."
+    return
+  fi
+
+  local response="n"
+  if [[ -r /dev/tty ]]; then
+    read -r -p "Install Aeronomicon Plymouth boot theme? [y/N] " response </dev/tty || response="n"
+  elif [[ -t 0 ]]; then
+    read -r -p "Install Aeronomicon Plymouth boot theme? [y/N] " response || response="n"
+  fi
+
+  case "${response}" in
+    [Yy]|[Yy][Ee][Ss])
+      run_plymouth_installer
+      ;;
+    *)
+      log "Skipping Plymouth boot theme installation."
+      ;;
+  esac
 }
 
 update_system_packages() {
@@ -727,6 +775,7 @@ main() {
 
   check_hostname
   detect_uplink_service
+  detect_plymouth
   record_uplink_state
   record_wwan_state
 
@@ -781,6 +830,7 @@ main() {
   update_repo
   ensure_scripts_executable
   update_system_packages
+  prompt_plymouth_install
 
   if [[ "${FULL_UPDATE}" == true ]]; then
     prompt_service_replacement
