@@ -132,6 +132,16 @@ configure_pisugar_for_navio2() {
     "/etc/pisugar.conf"
     "/etc/pisugar/pisugar.conf"
   )
+  local config
+  local found_configs=()
+
+  for config in "${config_files[@]}"; do
+    if [[ -f "${config}" ]]; then
+      found_configs+=("${config}")
+    fi
+  done
+
+  if ((${#found_configs[@]} == 0)); then
   local updated=false
   local config
   local has_config=false
@@ -199,6 +209,77 @@ PY
     return
   fi
 
+  log "PiSugar configs detected: ${found_configs[*]}"
+  log "Skipping automatic PiSugar config changes; only apply adjustments documented by PiSugar."
+  log "To avoid Navio2 I2C/pin conflicts while keeping battery/RTC telemetry, follow the official PiSugar docs for supported configuration options."
+}
+
+enable_soft_i2c_bus() {
+  local config_file="/boot/config.txt"
+  local overlay_line="dtoverlay=i2c-gpio,bus=3,i2c_gpio_sda=4,i2c_gpio_scl=5"
+  local backup_path
+  local match_cmd=()
+  local trap_set=false
+
+  trap 'log "Soft I2C enablement failed."; exit 1' ERR
+  trap_set=true
+
+  if [[ ! -f "${config_file}" ]]; then
+    log "ERROR: ${config_file} not found."
+    exit 1
+  fi
+
+  if ! command -v raspi-config >/dev/null 2>&1; then
+    log "ERROR: raspi-config not found; cannot enable I2C."
+    exit 1
+  fi
+
+  if command -v dpkg >/dev/null 2>&1; then
+    if ! dpkg -s i2c-tools >/dev/null 2>&1; then
+      log "Installing i2c-tools."
+      "${SUDO[@]}" apt-get install -y i2c-tools
+    fi
+
+    if ! dpkg -s raspberrypi-kernel-headers >/dev/null 2>&1; then
+      log "Installing raspberrypi-kernel-headers."
+      "${SUDO[@]}" apt-get install -y raspberrypi-kernel-headers
+    fi
+  else
+    log "dpkg not available; skipping package checks for i2c-tools and kernel headers."
+  fi
+
+  if command -v rg >/dev/null 2>&1; then
+    match_cmd=(rg -q "^${overlay_line}$")
+  else
+    match_cmd=(grep -q "^${overlay_line}$")
+  fi
+
+  local overlay_added=false
+  if "${match_cmd[@]}" "${config_file}"; then
+    log "Soft I2C overlay already present."
+  else
+    backup_path="${config_file}.bak.$(date +%Y%m%d%H%M%S)"
+    log "Backing up ${config_file} to ${backup_path}."
+    "${SUDO[@]}" cp "${config_file}" "${backup_path}"
+    log "Adding soft I2C overlay to ${config_file}."
+    printf '%s\n' "${overlay_line}" | "${SUDO[@]}" tee -a "${config_file}" >/dev/null
+    overlay_added=true
+  fi
+
+  log "Enabling I2C via raspi-config."
+  "${SUDO[@]}" raspi-config nonint do_i2c 0
+
+  if [[ "${overlay_added}" == true ]]; then
+    log "Soft I2C overlay added; reboot required before validation."
+  else
+    log "Validating I2C bus 3."
+    "${SUDO[@]}" i2cdetect -y 3 >/dev/null
+  fi
+
+  if [[ "${trap_set}" == true ]]; then
+    trap - ERR
+  fi
+  log "SOFT_I2C_ENABLED"
   if [[ "${updated}" == true ]]; then
     local load_state
     load_state="$(systemctl show -p LoadState --value pisugar-server.service 2>/dev/null || true)"
@@ -326,6 +407,7 @@ main() {
   update_repo
   ensure_scripts_executable
   update_system_packages
+  enable_soft_i2c_bus
   configure_pisugar_for_navio2
   prompt_service_replacement
   log "Update routine completed."
