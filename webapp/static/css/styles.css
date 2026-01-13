@@ -838,6 +838,7 @@ body.is-monochrome {
   --muted: #1a1a1a;
   --graph-load: #000000;
   --graph-memory: #000000;
+  --mono-border: 2px solid #000000;
 }
 
 body.is-monochrome img {
@@ -858,11 +859,11 @@ body.is-monochrome .status-strip,
 body.is-monochrome .modal__command {
   background: #ffffff;
   box-shadow: none;
-  border: 1px solid #000000;
+  border: var(--mono-border);
 }
 
 body.is-monochrome .shell__header {
-  border-bottom: 1px solid #000000;
+  border-bottom: var(--mono-border);
 }
 
 body.is-monochrome .shell__status {
@@ -877,7 +878,7 @@ body.is-monochrome .btn--disengage,
 body.is-monochrome .btn--service {
   background: #ffffff;
   color: #000000;
-  border: 1px solid #000000;
+  border: var(--mono-border);
 }
 
 body.is-monochrome .btn--ghost {
@@ -903,7 +904,8 @@ body.is-monochrome .menu-action {
 }
 
 body.is-monochrome .menu-action:hover {
-  border-color: #ffffff;
+  border-color: #000000;
+  background: #f0f0f0;
 }
 
 body.is-monochrome .health-card__badge,
@@ -919,13 +921,13 @@ body.is-monochrome .health-card__badge {
 }
 
 body.is-monochrome .log-line {
-  border-bottom-color: #000000;
+  border-bottom: var(--mono-border);
 }
 
 body.is-monochrome .lte-banner {
   color: #000000;
   background: #ffffff;
-  border-bottom-color: #000000;
+  border-bottom: var(--mono-border);
   text-shadow: none;
 }
 
@@ -944,6 +946,12 @@ body.is-monochrome .health-card--warn,
 body.is-monochrome .health-card--danger {
   border-color: #000000;
   box-shadow: none;
+}
+
+body.is-monochrome .shell__stat-card h3,
+body.is-monochrome .shell__stat-card .health-card__value {
+  color: #000000;
+  text-shadow: none;
 }
 
 @media (max-width: 960px) {
