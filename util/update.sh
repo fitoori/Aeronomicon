@@ -801,6 +801,12 @@ main() {
   trap '' HUP
   trap cleanup EXIT
 
+  # Pre-sync system time from PiSugar RTC before HTTPS checks/updates.
+  if [[ "${FULL_UPDATE}" == true ]]; then
+    enable_soft_i2c_bus_if_vehicle || true
+    pisugar_rtc_sync_sequence || true
+  fi
+
   # Now confirm we have non-wwan internet for update.
   check_non_wwan_internet
 
@@ -850,9 +856,6 @@ main() {
     else
       warn "PiSugar I2C addresses not detected via i2cdetect. If using pogo pins, check contact/solder mask per PiSugar FAQ."
     fi
-
-    # Use RTC immediately for plausible system time.
-    pisugar_rtc_sync_sequence || true
 
     # Final authoritative RTC sync + verification + battery report (vehicle only)
     pisugar_rtc_web_sync_and_verify || true
