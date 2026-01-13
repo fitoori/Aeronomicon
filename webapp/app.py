@@ -94,6 +94,7 @@ REMOTE_PIDFILE = "/tmp/onics-t.pid"
 # UI / streaming settings
 MAX_LOG_LINES = int(os.environ.get("MAX_LOG_LINES", "600"))
 HEALTH_TICK_HZ = float(os.environ.get("HEALTH_TICK_HZ", "1.0"))     # status push rate to UI
+STATUS_HEARTBEAT_S = float(os.environ.get("STATUS_HEARTBEAT_S", "5.0"))
 TAILSCALE_CHECK_S = float(os.environ.get("TAILSCALE_CHECK_S", "4.0"))  # local tailscale status check period
 DNS_CHECK_S = float(os.environ.get("DNS_CHECK_S", "2.0"))
 TCP_CHECK_S = float(os.environ.get("TCP_CHECK_S", "2.0"))
@@ -452,6 +453,7 @@ class OnicsController:
         self._system_backoff_s = 0.0
         self._last_wwan_bytes: Optional[Tuple[int, int]] = None
         self._last_status_payload: Optional[Dict[str, Any]] = None
+        self._last_status_publish_mono: float = 0.0
         with self._lock:
             self._autopilot.system = self._blank_system_stats()
 
@@ -607,9 +609,11 @@ class OnicsController:
 
     def publish_status(self) -> None:
         payload = self._status_payload()
-        if payload == self._last_status_payload:
+        now_m = monotonic_s()
+        if payload == self._last_status_payload and (now_m - self._last_status_publish_mono) < STATUS_HEARTBEAT_S:
             return
         self._last_status_payload = payload
+        self._last_status_publish_mono = now_m
         self._broker.publish("status", payload)
 
     # --- Health checks
