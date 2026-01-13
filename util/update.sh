@@ -46,6 +46,7 @@ WWAN_PRESENT=false
 WWAN_WAS_UP=false
 
 PLYMOUTH_AVAILABLE=false
+TAILSCALE_INSTALLED=false
 
 # PiSugar runtime state
 PISUGAR_VALIDATED=false           # end-to-end validated via pisugar-server
@@ -91,6 +92,18 @@ detect_plymouth() {
     if dpkg -s plymouth >/dev/null 2>&1; then
       PLYMOUTH_AVAILABLE=true
     fi
+  fi
+}
+
+detect_tailscale() {
+  if command -v tailscale >/dev/null 2>&1; then
+    TAILSCALE_INSTALLED=true
+    return
+  fi
+  local load_state
+  load_state="$(systemctl show -p LoadState --value tailscaled.service 2>/dev/null || true)"
+  if [[ -n "${load_state}" && "${load_state}" != "not-found" ]]; then
+    TAILSCALE_INSTALLED=true
   fi
 }
 
@@ -245,6 +258,54 @@ prompt_plymouth_install() {
       ;;
     *)
       log "Skipping Plymouth boot theme installation."
+      ;;
+  esac
+}
+
+install_webapp_service_port_80() {
+  local service_src="${REPO_DIR}/util/services/webapp.service"
+  local service_dest="/etc/systemd/system/webapp.service"
+  local override_dir="/etc/systemd/system/webapp.service.d"
+  local override_file="${override_dir}/override.conf"
+
+  [[ -f "${service_src}" ]] || die "Webapp service file not found: ${service_src}"
+
+  log "Installing webapp systemd service (port 80)."
+  "${SUDO[@]}" install -m 644 "${service_src}" "${service_dest}"
+  "${SUDO[@]}" mkdir -p "${override_dir}"
+  "${SUDO[@]}" tee "${override_file}" >/dev/null <<'EOF'
+[Service]
+Environment=FLASK_PORT=80
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+EOF
+
+  "${SUDO[@]}" systemctl daemon-reload
+  "${SUDO[@]}" systemctl enable --now webapp.service
+}
+
+prompt_webapp_install() {
+  if [[ "${FULL_UPDATE}" == true ]]; then
+    return
+  fi
+  if [[ "${TAILSCALE_INSTALLED}" != true ]]; then
+    log "Tailscale not detected; skipping webapp service install offer."
+    return
+  fi
+
+  local response="n"
+  if [[ -r /dev/tty ]]; then
+    read -r -p "Install ONICS-T webapp systemd service on port 80? [y/N] " response </dev/tty || response="n"
+  elif [[ -t 0 ]]; then
+    read -r -p "Install ONICS-T webapp systemd service on port 80? [y/N] " response || response="n"
+  fi
+
+  case "${response}" in
+    [Yy]|[Yy][Ee][Ss])
+      install_webapp_service_port_80
+      ;;
+    *)
+      log "Skipping webapp systemd service installation."
       ;;
   esac
 }
@@ -795,6 +856,7 @@ main() {
   check_hostname
   detect_uplink_service
   detect_plymouth
+  detect_tailscale
   record_uplink_state
   record_wwan_state
 
@@ -856,6 +918,8 @@ main() {
   else
     log "Skipping service installation on non-vehicle host."
   fi
+
+  prompt_webapp_install
 
   # Final authoritative RTC sync + verification + battery report (vehicle only)
   if [[ "${FULL_UPDATE}" == true ]]; then
