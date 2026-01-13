@@ -25,10 +25,7 @@ else
 fi
 
 if command -v plymouth-set-default-theme >/dev/null 2>&1; then
-  current_theme=$(plymouth-set-default-theme --get-default-theme 2>/dev/null || true)
-  if [[ "${current_theme}" != "${THEME_NAME}" ]]; then
-    plymouth-set-default-theme -R "${THEME_NAME}"
-  fi
+  plymouth-set-default-theme -R "${THEME_NAME}"
 else
   echo "plymouth-set-default-theme not found; theme copied but not activated." >&2
 fi
