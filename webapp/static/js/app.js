@@ -147,6 +147,11 @@ function updateTelemetryLogHeight() {
       applyHeight();
     }
   });
+  const rect = logView.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const padding = 24;
+  const height = Math.max(200, Math.floor(viewportHeight - rect.top - padding));
+  document.documentElement.style.setProperty("--telemetry-log-height", `${height}px`);
 }
 
 function setTelemetryLogExpanded(expanded) {
