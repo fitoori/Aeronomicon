@@ -65,9 +65,13 @@ const headerDisk = document.getElementById("header-disk");
 
 const urlParams = new URLSearchParams(window.location.search);
 const dryRunParam = (urlParams.get("dry_run") || "").toLowerCase();
+const loadOnlyParam = (urlParams.get("load_only") || "").toLowerCase();
 const isDryRun =
   document.body?.dataset.dryRun === "true" ||
   ["1", "true", "yes", "on"].includes(dryRunParam);
+const isLoadOnly =
+  document.body?.dataset.loadOnly === "true" ||
+  ["1", "true", "yes", "on"].includes(loadOnlyParam);
 
 let engageToggleAction = null;
 let rebootPending = false;
@@ -76,9 +80,17 @@ let isMonochromeMode = false;
 let connectionStatus = "ok";
 let latestSnapshot = null;
 
+function setLoadingState(enabled) {
+  document.body?.classList.toggle("is-loading", enabled);
+}
+
 function dismissLoadingScreen() {
+  if (isLoadOnly) {
+    return;
+  }
   if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
     loadingScreen.classList.add("hidden");
+    setLoadingState(false);
     setTimeout(() => loadingScreen.remove(), 600);
   }
 }
@@ -1234,7 +1246,7 @@ loginDismissBtn?.addEventListener("click", () => {
   loginModal?.setAttribute("aria-hidden", "true");
 });
 
-if (isDryRun) {
+if (isDryRun && !isLoadOnly) {
   dismissLoadingScreen();
   if (connectionPill) {
     connectionPill.textContent = "LINK: DRY RUN";
@@ -1243,6 +1255,18 @@ if (isDryRun) {
     connectionPill.style.borderColor = pillStyles.borderColor;
     connectionPill.style.color = pillStyles.color;
   }
+}
+
+if (isLoadOnly && connectionPill) {
+  connectionPill.textContent = "LINK: LOAD ONLY";
+  connectionStatus = "degraded";
+  const pillStyles = getConnectionPillStyles(connectionStatus);
+  connectionPill.style.borderColor = pillStyles.borderColor;
+  connectionPill.style.color = pillStyles.color;
+}
+
+if (loadingScreen && !loadingScreen.classList.contains("hidden")) {
+  setLoadingState(true);
 }
 
 if (monochromeToggle) {
@@ -1261,39 +1285,41 @@ try {
   console.warn("Unable to read monochrome preference", err);
 }
 
-const eventSource = new EventSource("/stream");
+if (!isLoadOnly) {
+  const eventSource = new EventSource("/stream");
 
-eventSource.onopen = () => {
-  setOfflineState(false);
-};
+  eventSource.onopen = () => {
+    setOfflineState(false);
+  };
 
-eventSource.addEventListener("status", (event) => {
-  updateSnapshot(JSON.parse(event.data), { fromStream: true });
-});
+  eventSource.addEventListener("status", (event) => {
+    updateSnapshot(JSON.parse(event.data), { fromStream: true });
+  });
 
-eventSource.addEventListener("state", (event) => {
-  updateSnapshot(JSON.parse(event.data), { fromStream: true });
-});
+  eventSource.addEventListener("state", (event) => {
+    updateSnapshot(JSON.parse(event.data), { fromStream: true });
+  });
 
-eventSource.addEventListener("log", (event) => {
-  const payload = JSON.parse(event.data);
-  appendLog(payload.line);
-});
+  eventSource.addEventListener("log", (event) => {
+    const payload = JSON.parse(event.data);
+    appendLog(payload.line);
+  });
 
-eventSource.onerror = () => {
-  if (!isDryRun) {
-    setOfflineState(true);
-    connectionPill.textContent = "LINK: OFFLINE";
-    connectionStatus = "los";
-    const pillStyles = getConnectionPillStyles(connectionStatus);
-    connectionPill.style.borderColor = pillStyles.borderColor;
-    connectionPill.style.color = pillStyles.color;
-  }
-  if (rebootPending) {
-    rebootAwaitingLoss = false;
-    setRebootOverlay(true);
-  }
-};
+  eventSource.onerror = () => {
+    if (!isDryRun) {
+      setOfflineState(true);
+      connectionPill.textContent = "LINK: OFFLINE";
+      connectionStatus = "los";
+      const pillStyles = getConnectionPillStyles(connectionStatus);
+      connectionPill.style.borderColor = pillStyles.borderColor;
+      connectionPill.style.color = pillStyles.color;
+    }
+    if (rebootPending) {
+      rebootAwaitingLoss = false;
+      setRebootOverlay(true);
+    }
+  };
+}
 
 setInterval(() => {
   if (!latestSnapshot) {
@@ -1320,14 +1346,16 @@ if (loadGraphs.length) {
   }, 1000);
 }
 
-fetch("/api/snapshot")
-  .then((res) => res.json())
-  .then((snapshot) => {
-    updateSnapshot(snapshot);
-    (snapshot.logs || []).forEach((line) => {
-      parseTelemetry(line);
+if (!isLoadOnly) {
+  fetch("/api/snapshot")
+    .then((res) => res.json())
+    .then((snapshot) => {
+      updateSnapshot(snapshot);
+      (snapshot.logs || []).forEach((line) => {
+        parseTelemetry(line);
+      });
+    })
+    .catch(() => {
+      appendLog("WARNING: Unable to fetch initial snapshot.");
     });
-  })
-  .catch(() => {
-    appendLog("WARNING: Unable to fetch initial snapshot.");
-  });
+}
