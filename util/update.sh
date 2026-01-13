@@ -407,6 +407,136 @@ i2c_scan_all_busses() {
   shopt -u nullglob
 }
 
+i2c_has_addr_in_table() {
+  # Usage: i2c_has_addr_in_table "<table>" "57"
+  local table="$1"
+  local addr="$2"
+  echo "${table}" | grep -qw "${addr}"
+}
+
+i2c_read_byte_reg() {
+  # Usage: i2c_read_byte_reg <bus> <addr_hex_no0x> <reg_hex_no0x>
+  # Returns: hex byte like "0x1a" on stdout, empty on failure.
+  local bus="$1" addr="$2" reg="$3"
+  "${SUDO[@]}" i2cget -y "${bus}" "0x${addr}" "0x${reg}" 2>/dev/null || true
+}
+
+hex_to_dec() {
+  # "0x1a" -> 26 ; "1a" -> 26
+  local h="${1#0x}"
+  printf '%d' "$((16#${h}))"
+}
+
+count_ones_7bit() {
+  local x="$1" c=0
+  # x should be 0..127
+  while (( x )); do
+    ((c += x & 1))
+    ((x >>= 1))
+  done
+  echo "${c}"
+}
+
+pisugar3_signature_score() {
+  # Read-only signature check against PiSugar3 register map.
+  # Returns 0 if strong match, 1 otherwise.
+  # Uses regs documented in PiSugar3 I2C datasheet. 
+  local bus="$1" addr_hex="$2"
+  local addr_dec ones parity expected50 reg50 reg2a reg22 reg23
+  local bat_dec vh vl mv
+
+  addr_dec="$(hex_to_dec "${addr_hex}")"
+  reg50="$(i2c_read_byte_reg "${bus}" "${addr_hex}" "50")"
+  reg2a="$(i2c_read_byte_reg "${bus}" "${addr_hex}" "2a")"
+  reg22="$(i2c_read_byte_reg "${bus}" "${addr_hex}" "22")"
+  reg23="$(i2c_read_byte_reg "${bus}" "${addr_hex}" "23")"
+
+  [[ -n "${reg50}" && -n "${reg2a}" && -n "${reg22}" && -n "${reg23}" ]] || return 1
+
+  # Validate 0x50 parity-encoded address (datasheet example: 0x57 -> 0xD7). 
+  ones="$(count_ones_7bit "${addr_dec}")"
+  parity=$(( ones % 2 ))                 # odd -> 1, even -> 0
+  expected50=$(( addr_dec | (parity << 7) ))
+  if [[ "$(hex_to_dec "${reg50}")" -ne "${expected50}" ]]; then
+    return 1
+  fi
+
+  # Battery percent 0x2A should be 0-100. 
+  bat_dec="$(hex_to_dec "${reg2a}")"
+  if (( bat_dec < 0 || bat_dec > 100 )); then
+    return 1
+  fi
+
+  # Voltage bytes 0x22/0x23 should combine into plausible mV. 
+  vh="$(hex_to_dec "${reg22}")"
+  vl="$(hex_to_dec "${reg23}")"
+  mv=$(( (vh << 8) | vl ))
+  if (( mv < 2500 || mv > 5000 )); then
+    return 1
+  fi
+
+  return 0
+}
+
+set_boot_i2c1_baudrate() {
+  # Ensures dtparam=i2c1_baudrate=<target> in /boot/config.txt.
+  local target="$1"
+  local cfg="/boot/config.txt"
+  [[ -f "${cfg}" ]] || die "/boot/config.txt not found"
+
+  local backup="${cfg}.bak.$(date +%Y%m%d%H%M%S)"
+  "${SUDO[@]}" cp "${cfg}" "${backup}"
+
+  # Replace any of the common aliases, else append.
+  if grep -Eq '^\s*dtparam=(i2c1_baudrate|i2c_arm_baudrate|i2c_baudrate)=' "${cfg}"; then
+    "${SUDO[@]}" sed -i \
+      -E "s/^\s*dtparam=(i2c1_baudrate|i2c_arm_baudrate|i2c_baudrate)=.*/dtparam=i2c1_baudrate=${target}/" \
+      "${cfg}"
+  else
+    printf '%s\n' "dtparam=i2c1_baudrate=${target}" | "${SUDO[@]}" tee -a "${cfg}" >/dev/null
+  fi
+
+  log "Updated I2C1 baudrate in ${cfg} (backup: ${backup}) to ${target}."
+}
+
+get_boot_i2c1_baudrate() {
+  local cfg="/boot/config.txt"
+  [[ -f "${cfg}" ]] || return 0
+  # return last seen value if multiple
+  grep -E '^\s*dtparam=(i2c1_baudrate|i2c_arm_baudrate|i2c_baudrate)=' "${cfg}" \
+    | tail -n1 \
+    | awk -F'=' '{print $NF}' \
+    | tr -dc '0-9' \
+    || true
+}
+
+set_pisugar_server_i2c_addr() {
+  # Sets/creates i2c_addr in /etc/pisugar-server/config.json (decimal).
+  # PiSugar docs: if i2c_addr isn't present, add it. 
+  local addr_dec="$1"
+  local cfg="/etc/pisugar-server/config.json"
+  [[ -f "${cfg}" ]] || die "${cfg} not found (pisugar-server installed but config missing?)"
+
+  require_command python3
+
+  local backup="${cfg}.bak.$(date +%Y%m%d%H%M%S)"
+  "${SUDO[@]}" cp "${cfg}" "${backup}"
+
+  "${SUDO[@]}" python3 - "${cfg}" "${addr_dec}" <<'PY'
+import json, sys
+path=sys.argv[1]
+addr=int(sys.argv[2])
+with open(path,"r",encoding="utf-8") as f:
+    data=json.load(f)
+data["i2c_addr"]=addr
+with open(path,"w",encoding="utf-8") as f:
+    json.dump(data,f,indent=2)
+    f.write("\n")
+PY
+
+  log "Set pisugar-server i2c_addr=${addr_dec} (backup: ${backup})."
+}
+
 find_pisugar3_bus() {
   # PiSugar 3 Power Manager occupies 0x57 & 0x68.
   # We treat presence of 0x57 as the primary indicator.
@@ -632,68 +762,84 @@ pisugar_repair_and_validate() {
 
   init_diag_log
 
-  # Ensure service exists
-  local load_state
-  load_state="$(systemctl show -p LoadState --value pisugar-server.service 2>/dev/null || true)"
-  [[ -n "${load_state}" && "${load_state}" != "not-found" ]] || die "pisugar-server.service not installed on WATNE."
+  # Ensure i2c-tools exists for i2cdetect/i2cdump per PiSugar docs. 
+  ensure_apt_pkg i2c-tools
 
-  # Start service (if stopped)
-  "${SUDO[@]}" systemctl start pisugar-server.service || true
+  log "PiSugar remediation: probing I2C bus 1 (expected PiSugar3 addrs: 0x57 & 0x68)."
+  local t_quick t_read
+  t_quick="$("${SUDO[@]}" i2cdetect -y 1 2>/dev/null || true)"
+  t_read="$("${SUDO[@]}" i2cdetect -y -r 1 2>/dev/null || true)"
+  log_to_diag "i2cdetect -y 1\n${t_quick}"
+  log_to_diag "i2cdetect -y -r 1\n${t_read}"
 
-  # If already healthy, done.
+  local seen57=false seen68=false
+  if i2c_has_addr_in_table "${t_quick}" "57" || i2c_has_addr_in_table "${t_read}" "57"; then seen57=true; fi
+  if i2c_has_addr_in_table "${t_quick}" "68" || i2c_has_addr_in_table "${t_read}" "68"; then seen68=true; fi
+
+  if [[ "${seen57}" == true || "${seen68}" == true ]]; then
+    log "PiSugar addresses appear present on I2C bus 1 (57=${seen57}, 68=${seen68}). Proceeding to server validation."
+    restart_pisugar_server
+    if pisugar_health_check; then
+      log "PiSugar OK. Battery=${PISUGAR_BATTERY_PCT}%"
+      return 0
+    fi
+  fi
+
+  # Vendor recommended deeper probe: i2cdump expected addrs. 
+  log "PiSugar not visible in i2cdetect; attempting vendor i2cdump probes (read-only)."
+  "${SUDO[@]}" i2cdump -y 1 0x57 >/dev/null 2>&1 || true
+  "${SUDO[@]}" i2cdump -y 1 0x68 >/dev/null 2>&1 || true
+
+  # If server now works, stop here.
+  "${SUDO[@]}" systemctl start pisugar-server.service >/dev/null 2>&1 || true
   if pisugar_health_check; then
-    log "PiSugar OK. Battery=${PISUGAR_BATTERY_PCT}%"
+    log "PiSugar restored after deeper probe. Battery=${PISUGAR_BATTERY_PCT}%"
     return 0
   fi
 
-  log "PiSugar reports I2C failure (e.g., 'I2C not connected'). Starting software remediation."
-
-  # 1) Ensure runtime I2C exists; if not, enable and require reboot.
-  local i2c_state
-  if ! i2c_state="$(ensure_i2c_runtime_ready_or_reboot; echo $?)"; then
-    :
-  fi
-  if [[ "${i2c_state}" == "2" ]]; then
-    pisugar_collect_failure_bundle
-    warn "I2C was enabled in boot config but is not active yet. Reboot is required to bring up /dev/i2c-1."
+  # Phase B: bus clock remediation (your config shows 1MHz). This is the highest-probability software fix.
+  local br
+  br="$(get_boot_i2c1_baudrate || true)"
+  if [[ -n "${br}" && "${br}" -gt 400000 ]]; then
+    warn "I2C1 baudrate is ${br} (>400000). PiSugar3 may not ACK reliably. Downgrading to 400000 and requiring reboot."
+    set_boot_i2c1_baudrate 400000
 
     local response="n"
     if [[ -r /dev/tty ]]; then
-      read -r -p "Reboot now to activate I2C and retry PiSugar validation? [y/N] " response </dev/tty || response="n"
+      read -r -p "Reboot now to apply I2C baudrate change and re-test PiSugar? [y/N] " response </dev/tty || response="n"
     fi
     if [[ "${response}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
-      log "Rebooting now (required for I2C activation). Re-run update after boot."
-      "${SUDO[@]}" shutdown -r now "Reboot required to activate I2C for PiSugar"
+      log "Rebooting now. Re-run update after boot; PiSugar probe will retry automatically."
+      "${SUDO[@]}" shutdown -r now "Apply I2C baudrate change for PiSugar"
       exit 0
     fi
-    die "Cannot proceed on WATNE until I2C is active and PiSugar is readable."
+    die "Reboot required to apply I2C baudrate change; cannot proceed on WATNE without PiSugar telemetry."
   fi
 
-  # 2) Ensure pisugar-server has I2C permissions.
-  ensure_pisugar_service_i2c_permissions
+  # Phase C: mutable address detection (read-only identification via PiSugar3 register map). 
+  log "Attempting PiSugar3 mutable-address detection on I2C bus 1 (read-only)."
+  local addrs addr
+  addrs="$( (echo "${t_read}"; echo "${t_quick}") \
+    | awk 'NR>1 {for(i=2;i<=NF;i++) if($i!="--" && $i!="UU") print $i}' \
+    | sort -u )"
 
-  # 3) Find which I2C bus has PiSugar (0x57 expected).
-  local bus
-  bus="$(find_pisugar3_bus || true)"
-  if [[ -z "${bus}" ]]; then
-    pisugar_collect_failure_bundle
-    die "PiSugar3 I2C address 0x57 not detected on any /dev/i2c-* bus. Software remediation exhausted."
-  fi
-  log "Detected PiSugar3 on I2C bus ${bus} (0x57 present)."
+  while IFS= read -r addr; do
+    [[ -n "${addr}" ]] || continue
+    if pisugar3_signature_score 1 "${addr}"; then
+      local addr_dec
+      addr_dec="$(hex_to_dec "${addr}")"
+      warn "Found PiSugar3-like signature at I2C addr 0x${addr}. Updating pisugar-server i2c_addr=${addr_dec} and restarting."
+      set_pisugar_server_i2c_addr "${addr_dec}"
+      restart_pisugar_server
+      if pisugar_health_check; then
+        log "PiSugar restored via mutable-address fix. Battery=${PISUGAR_BATTERY_PCT}%"
+        return 0
+      fi
+    fi
+  done <<< "${addrs}"
 
-  # 4) Force pisugar-server config to use that bus (i2c_bus is supported in config.json).
-  update_pisugar_config_json_bus "${bus}"
-
-  # 5) Restart service and re-check health.
-  restart_pisugar_server
-  if pisugar_health_check; then
-    log "PiSugar restored. Battery=${PISUGAR_BATTERY_PCT}%"
-    return 0
-  fi
-
-  # Final: diagnostics + fail hard.
   pisugar_collect_failure_bundle
-  die "PiSugar still reports I2C failure after remediation. See ${DIAG_FILE} for full diagnostics."
+  die "PiSugar still not reachable on I2C. Expected 0x57/0x68 per PiSugar docs. See ${DIAG_FILE}."
 }
 
 ensure_pisugar_validated() {
