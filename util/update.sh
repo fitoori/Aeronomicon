@@ -22,6 +22,8 @@ UPLINK_WAS_ACTIVE=""
 UPLINK_WAS_ENABLED=""
 WWAN_PRESENT=false
 WWAN_WAS_UP=false
+PISUGAR_PRESENT=false
+PISUGAR_PACKAGES=()
 
 detect_uplink_service() {
   local load_state
@@ -91,6 +93,120 @@ restore_wwan_state() {
 cleanup() {
   restore_wwan_state
   restore_uplink_state
+}
+
+detect_pisugar_packages() {
+  local filter_cmd=()
+  if command -v rg >/dev/null 2>&1; then
+    filter_cmd=(rg -i '^pisugar')
+  else
+    filter_cmd=(grep -i '^pisugar')
+  fi
+
+  if command -v dpkg-query >/dev/null 2>&1; then
+    mapfile -t PISUGAR_PACKAGES < <(dpkg-query -W -f='${Package}\n' | "${filter_cmd[@]}" || true)
+  elif command -v rpm >/dev/null 2>&1; then
+    mapfile -t PISUGAR_PACKAGES < <(rpm -qa | "${filter_cmd[@]}" || true)
+  else
+    log "Package manager not detected; skipping PiSugar package detection."
+    return
+  fi
+
+  if ((${#PISUGAR_PACKAGES[@]} > 0)); then
+    PISUGAR_PRESENT=true
+    log "Detected PiSugar packages: ${PISUGAR_PACKAGES[*]}"
+  else
+    log "No PiSugar packages detected."
+  fi
+}
+
+configure_pisugar_for_navio2() {
+  if [[ "${PISUGAR_PRESENT}" != true ]]; then
+    log "PiSugar configuration not needed; skipping."
+    return
+  fi
+
+  local config_files=(
+    "/etc/pisugar-server/config.json"
+    "/etc/pisugar-server.json"
+    "/etc/pisugar.conf"
+    "/etc/pisugar/pisugar.conf"
+  )
+  local config
+  local found_configs=()
+
+  for config in "${config_files[@]}"; do
+    if [[ -f "${config}" ]]; then
+      found_configs+=("${config}")
+    fi
+  done
+
+  if ((${#found_configs[@]} == 0)); then
+    log "PiSugar packages detected but no known configuration files were found."
+    return
+  fi
+
+  log "PiSugar configs detected: ${found_configs[*]}"
+  log "Skipping automatic PiSugar config changes; only apply adjustments documented by PiSugar."
+  log "To avoid Navio2 I2C/pin conflicts while keeping battery/RTC telemetry, follow the official PiSugar docs for supported configuration options."
+}
+
+enable_soft_i2c_bus() {
+  local config_file="/boot/config.txt"
+  local overlay_line="dtoverlay=i2c-gpio,bus=3,i2c_gpio_sda=4,i2c_gpio_scl=5"
+  local backup_path
+  local match_cmd=()
+  local trap_set=false
+
+  trap 'log "Soft I2C enablement failed."; exit 1' ERR
+  trap_set=true
+
+  if [[ ! -f "${config_file}" ]]; then
+    log "ERROR: ${config_file} not found."
+    exit 1
+  fi
+
+  if ! command -v raspi-config >/dev/null 2>&1; then
+    log "ERROR: raspi-config not found; cannot enable I2C."
+    exit 1
+  fi
+
+  if ! dpkg -s i2c-tools >/dev/null 2>&1; then
+    log "Installing i2c-tools."
+    "${SUDO[@]}" apt-get install -y i2c-tools
+  fi
+
+  if ! dpkg -s raspberrypi-kernel-headers >/dev/null 2>&1; then
+    log "Installing raspberrypi-kernel-headers."
+    "${SUDO[@]}" apt-get install -y raspberrypi-kernel-headers
+  fi
+
+  if command -v rg >/dev/null 2>&1; then
+    match_cmd=(rg -q "^${overlay_line}$")
+  else
+    match_cmd=(grep -q "^${overlay_line}$")
+  fi
+
+  if "${match_cmd[@]}" "${config_file}"; then
+    log "Soft I2C overlay already present."
+  else
+    backup_path="${config_file}.bak.$(date +%Y%m%d%H%M%S)"
+    log "Backing up ${config_file} to ${backup_path}."
+    "${SUDO[@]}" cp "${config_file}" "${backup_path}"
+    log "Adding soft I2C overlay to ${config_file}."
+    printf '%s\n' "${overlay_line}" | "${SUDO[@]}" tee -a "${config_file}" >/dev/null
+  fi
+
+  log "Enabling I2C via raspi-config."
+  "${SUDO[@]}" raspi-config nonint do_i2c 0
+
+  log "Validating I2C bus 3."
+  "${SUDO[@]}" i2cdetect -y 3 >/dev/null
+
+  if [[ "${trap_set}" == true ]]; then
+    trap - ERR
+  fi
+  log "SOFT_I2C_ENABLED"
 }
 
 check_non_wwan_internet() {
@@ -181,6 +297,7 @@ main() {
   require_command systemctl
   check_non_wwan_internet
   detect_uplink_service
+  detect_pisugar_packages
   record_uplink_state
   record_wwan_state
   trap '' HUP
@@ -205,6 +322,8 @@ main() {
   update_repo
   ensure_scripts_executable
   update_system_packages
+  enable_soft_i2c_bus
+  configure_pisugar_for_navio2
   prompt_service_replacement
   log "Update routine completed."
 }
