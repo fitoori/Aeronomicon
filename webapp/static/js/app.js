@@ -1,6 +1,7 @@
 const engageToggleBtn = document.getElementById("engage-toggle-btn");
 const clearBtn = document.getElementById("clear-btn");
 const logView = document.getElementById("log-view");
+const telemetryLogToggle = document.getElementById("telemetry-log-toggle");
 const loadingScreen = document.getElementById("loading-screen");
 const offlineScreen = document.getElementById("offline-screen");
 const rebootScreen = document.getElementById("reboot-screen");
@@ -73,12 +74,15 @@ const isLoadOnly =
   document.body?.dataset.loadOnly === "true" ||
   ["1", "true", "yes", "on"].includes(loadOnlyParam);
 
+const MIN_TELEMETRY_LOG_HEIGHT = 0;
+
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
 let isMonochromeMode = false;
 let connectionStatus = "ok";
 let latestSnapshot = null;
+let telemetryLogExpanded = false;
 
 function setLoadingState(enabled) {
   document.body?.classList.toggle("is-loading", enabled);
@@ -119,6 +123,41 @@ function setLteBanner(active) {
   }
   lteBanner.classList.toggle("is-visible", active);
   lteBanner.setAttribute("aria-hidden", active ? "false" : "true");
+}
+
+function updateTelemetryLogHeight() {
+  if (!telemetryLogExpanded || !logView) {
+    return;
+  }
+  const documentElement = document.documentElement;
+  const applyHeight = () => {
+    const rect = logView.getBoundingClientRect();
+    const slack = documentElement.clientHeight - documentElement.scrollHeight;
+    document.body?.classList.toggle("is-telemetry-log-compact", slack < 0);
+    const height = Math.max(MIN_TELEMETRY_LOG_HEIGHT, Math.floor(rect.height + slack));
+    documentElement.style.setProperty("--telemetry-log-height", `${height}px`);
+  };
+  applyHeight();
+  requestAnimationFrame(() => {
+    if (!telemetryLogExpanded || !logView) {
+      return;
+    }
+    const slack = documentElement.clientHeight - documentElement.scrollHeight;
+    if (Math.abs(slack) > 1) {
+      applyHeight();
+    }
+  });
+}
+
+function setTelemetryLogExpanded(expanded) {
+  telemetryLogExpanded = expanded;
+  document.body?.classList.toggle("is-telemetry-log-expanded", expanded);
+  telemetryLogToggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (!expanded) {
+    document.documentElement.style.removeProperty("--telemetry-log-height");
+    document.body?.classList.remove("is-telemetry-log-compact");
+  }
+  updateTelemetryLogHeight();
 }
 
 function setMonochromeMode(enabled) {
@@ -1141,6 +1180,17 @@ clearBtn?.addEventListener("click", async () => {
   }
 });
 
+telemetryLogToggle?.addEventListener("click", () => {
+  setTelemetryLogExpanded(!telemetryLogExpanded);
+});
+
+telemetryLogToggle?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    setTelemetryLogExpanded(!telemetryLogExpanded);
+  }
+});
+
 serviceRestartButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const service = button.getAttribute("data-service-restart");
@@ -1214,6 +1264,10 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setLogoMenuOpen(false);
   }
+});
+
+window.addEventListener("resize", () => {
+  updateTelemetryLogHeight();
 });
 
 rebootBtn?.addEventListener("click", async () => {
