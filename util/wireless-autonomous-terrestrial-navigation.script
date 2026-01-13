@@ -1,0 +1,75 @@
+# Plymouth Script Theme: wireless-autonomous-terrestrial-navigation
+# Generated assets: seal.png, pulse_*.png, sheen_*.png
+# Animation: fade-in + radial pulse + sweeping sheen
+
+seal_image = Image("seal.png");
+seal_sprite = Sprite(seal_image);
+seal_sprite.SetZ(-100);
+
+pulse_images = [];
+sheen_images = [];
+
+PULSE_FRAMES = 24;
+SHEEN_FRAMES = 36;
+
+for (i = 0; i < PULSE_FRAMES; i = i + 1)
+{
+    pulse_images[i] = Image("pulse_" + i + ".png");
+}
+
+for (i = 0; i < SHEEN_FRAMES; i = i + 1)
+{
+    sheen_images[i] = Image("sheen_" + i + ".png");
+}
+
+pulse_sprite = Sprite(pulse_images[0]);
+pulse_sprite.SetZ(-90);
+
+sheen_sprite = Sprite(sheen_images[0]);
+sheen_sprite.SetZ(-80);
+
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+fun center_sprite(sprite, image)
+{
+    sprite.SetX((screen_width - image.GetWidth()) / 2);
+    sprite.SetY((screen_height - image.GetHeight()) / 2);
+}
+
+center_sprite(seal_sprite, seal_image);
+center_sprite(pulse_sprite, pulse_images[0]);
+center_sprite(sheen_sprite, sheen_images[0]);
+
+seal_sprite.SetOpacity(0.0);
+pulse_sprite.SetOpacity(0.0);
+sheen_sprite.SetOpacity(0.0);
+
+fade = 0.0;
+frame = 0;
+
+fun refresh_callback ()
+{
+    # 50 FPS nominal; Plymouth will clamp based on system
+    frame = frame + 1;
+
+    # Fade-in over ~1s
+    if (fade < 1.0)
+    {
+        fade = fade + 0.02;
+        if (fade > 1.0) { fade = 1.0; }
+        seal_sprite.SetOpacity(fade);
+        pulse_sprite.SetOpacity(fade);
+        sheen_sprite.SetOpacity(fade);
+    }
+
+    # Pulse: loop, independent of sheen
+    pulse_index = frame % PULSE_FRAMES;
+    pulse_sprite.SetImage(pulse_images[pulse_index]);
+
+    # Sheen: loop
+    sheen_index = frame % SHEEN_FRAMES;
+    sheen_sprite.SetImage(sheen_images[sheen_index]);
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);

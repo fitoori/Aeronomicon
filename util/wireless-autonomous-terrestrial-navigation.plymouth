@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Wireless Autonomous Terrestrial Navigation
+Description=Boot splash for Wireless Autonomous Terrestrial Navigation Experiment (Toronto, Canada)
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/wireless-autonomous-terrestrial-navigation
+ScriptFile=/usr/share/plymouth/themes/wireless-autonomous-terrestrial-navigation/wireless-autonomous-terrestrial-navigation.script
