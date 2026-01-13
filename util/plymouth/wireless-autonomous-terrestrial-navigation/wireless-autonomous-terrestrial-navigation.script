@@ -54,6 +54,21 @@ pulse_sprite.SetZ(-90);
 sheen_sprite = Sprite(sheen_images[0]);
 sheen_sprite.SetZ(-80);
 
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+seal_image = scale_image_to_fit(seal_image);
+
+for (i = 0; i < PULSE_FRAMES; i = i + 1)
+{
+    pulse_images[i] = scale_image_to_fit(pulse_images[i]);
+}
+
+for (i = 0; i < SHEEN_FRAMES; i = i + 1)
+{
+    sheen_images[i] = scale_image_to_fit(sheen_images[i]);
+}
+
 fun center_sprite(sprite, image)
 {
     sprite.SetX((screen_width - image.GetWidth()) / 2);

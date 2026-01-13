@@ -24,6 +24,9 @@ import argparse
 import builtins
 from datetime import datetime
 
+# Ensure MAVLink 2.0 is enabled before importing dronekit/pymavlink.
+os.environ.setdefault("MAVLINK20", "1")
+
 import numpy as np
 import cv2
 
