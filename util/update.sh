@@ -48,6 +48,10 @@ WWAN_WAS_UP=false
 PLYMOUTH_AVAILABLE=false
 TAILSCALE_INSTALLED=false
 
+# Boot partition state
+BOOT_MOUNT_POINT=""
+BOOT_WAS_RW=""
+
 # PiSugar runtime state
 PISUGAR_VALIDATED=false           # end-to-end validated via pisugar-server
 PISUGAR_MODEL=""
@@ -104,6 +108,84 @@ detect_tailscale() {
   load_state="$(systemctl show -p LoadState --value tailscaled.service 2>/dev/null || true)"
   if [[ -n "${load_state}" && "${load_state}" != "not-found" ]]; then
     TAILSCALE_INSTALLED=true
+  fi
+}
+
+detect_boot_partition() {
+  local mount_point=""
+  local opts=""
+
+  if command -v mountpoint >/dev/null 2>&1; then
+    if mountpoint -q /boot/firmware; then
+      mount_point="/boot/firmware"
+    elif mountpoint -q /boot; then
+      mount_point="/boot"
+    fi
+  fi
+
+  if [[ -z "${mount_point}" ]]; then
+    if command -v findmnt >/dev/null 2>&1; then
+      mount_point="$(findmnt -n -o TARGET /boot/firmware 2>/dev/null || true)"
+      if [[ -z "${mount_point}" ]]; then
+        mount_point="$(findmnt -n -o TARGET /boot 2>/dev/null || true)"
+      fi
+    fi
+  fi
+
+  BOOT_MOUNT_POINT="${mount_point}"
+  if [[ -z "${BOOT_MOUNT_POINT}" ]]; then
+    warn "Boot partition mount point not detected; skipping boot lock checks."
+    return 0
+  fi
+
+  if command -v findmnt >/dev/null 2>&1; then
+    opts="$(findmnt -n -o OPTIONS "${BOOT_MOUNT_POINT}" 2>/dev/null || true)"
+  else
+    opts="$(mount | awk -v mp="${BOOT_MOUNT_POINT}" '$3 == mp {print $6}' | tr -d '()' || true)"
+  fi
+
+  if echo "${opts}" | grep -qw "ro"; then
+    BOOT_WAS_RW=false
+  else
+    BOOT_WAS_RW=true
+  fi
+}
+
+ensure_boot_partition_unlocked() {
+  if [[ -z "${BOOT_MOUNT_POINT}" ]]; then
+    return 0
+  fi
+
+  if command -v findmnt >/dev/null 2>&1; then
+    if findmnt -n -o OPTIONS "${BOOT_MOUNT_POINT}" | grep -qw "ro"; then
+      log "Boot partition is read-only; remounting ${BOOT_MOUNT_POINT} read-write."
+      "${SUDO[@]}" mount -o remount,rw "${BOOT_MOUNT_POINT}"
+    else
+      log "Boot partition already read-write (${BOOT_MOUNT_POINT})."
+    fi
+  else
+    log "findmnt not available; remounting ${BOOT_MOUNT_POINT} read-write."
+    "${SUDO[@]}" mount -o remount,rw "${BOOT_MOUNT_POINT}"
+  fi
+}
+
+restore_boot_partition_state() {
+  if [[ -z "${BOOT_MOUNT_POINT}" ]]; then
+    return 0
+  fi
+
+  if [[ "${FULL_UPDATE}" == true ]]; then
+    log "Re-locking boot partition (${BOOT_MOUNT_POINT}) as read-only."
+    "${SUDO[@]}" mount -o remount,ro "${BOOT_MOUNT_POINT}" || warn "Failed to remount ${BOOT_MOUNT_POINT} read-only."
+    return 0
+  fi
+
+  if [[ "${BOOT_WAS_RW}" == true ]]; then
+    log "Restoring boot partition to read-write (${BOOT_MOUNT_POINT})."
+    "${SUDO[@]}" mount -o remount,rw "${BOOT_MOUNT_POINT}" || warn "Failed to restore ${BOOT_MOUNT_POINT} read-write."
+  else
+    log "Restoring boot partition to read-only (${BOOT_MOUNT_POINT})."
+    "${SUDO[@]}" mount -o remount,ro "${BOOT_MOUNT_POINT}" || warn "Failed to restore ${BOOT_MOUNT_POINT} read-only."
   fi
 }
 
@@ -168,6 +250,7 @@ restore_wwan_state() {
 cleanup() {
   restore_wwan_state
   restore_uplink_state
+  restore_boot_partition_state
 }
 
 check_non_wwan_internet() {
@@ -866,11 +949,14 @@ main() {
   detect_uplink_service
   detect_plymouth
   detect_tailscale
+  detect_boot_partition
   record_uplink_state
   record_wwan_state
 
   trap '' HUP
   trap cleanup EXIT
+
+  ensure_boot_partition_unlocked
 
   # Now confirm we have non-wwan internet for update.
   check_non_wwan_internet
