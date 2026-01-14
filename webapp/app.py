@@ -89,7 +89,11 @@ MOSH_ENABLED_ENV = os.environ.get("WATNE_MOSH_ENABLE", "1")
 
 # Remote script path (as provided)
 REMOTE_ONICS_T_PATH = "~/Aeronomicon/onics-t.py"
-LEGACY_SCRIPT_DEFAULT = "/home/pi/vision_to_mavros/scripts/t265_precland_apriltags.py"
+LEGACY_SCRIPT_DEFAULT = (
+    "/home/pi/vision_to_mavros/scripts/t265_precland_apriltags.py "
+    "--connect=127.0.0.1:14550 "
+    "--baudrate=921600"
+)
 REMOTE_PIDFILE = "/tmp/onics-t.pid"
 
 # UI / streaming settings
@@ -1729,7 +1733,21 @@ class OnicsController:
         with self._lock:
             legacy_backend = self._runtime.legacy_backend
             legacy_script_path = self._runtime.legacy_script_path
-            script_path = legacy_script_path if legacy_backend else REMOTE_ONICS_T_PATH
+
+        if legacy_backend:
+            script_tokens = shlex.split(legacy_script_path)
+            if not script_tokens:
+                self._append_log("LEGACY START FAILED: no script path provided")
+                self._set_state("ERROR", "Legacy script path is empty")
+                self._ssh_close()
+                return
+            script_path = script_tokens[0]
+            onics_args = " ".join(shlex.quote(part) for part in script_tokens)
+        else:
+            script_path = REMOTE_ONICS_T_PATH
+            onics_args = shlex.quote(script_path)
+
+        with self._lock:
             self._runtime.active_script_path = script_path
 
         # Remote preflight: ensure python3 and script exist.
@@ -1761,7 +1779,6 @@ class OnicsController:
         # - PYTHONUNBUFFERED forces line-buffering.
         # - Writes PID into /tmp/onics-t.pid for deterministic stop.
         # - Uses 2>&1 to merge stderr into stdout for unified log stream.
-        onics_args = script_arg
         remote_cmd = (
             "bash -lc 'set -euo pipefail; "
             "export PYTHONUNBUFFERED=1; "
