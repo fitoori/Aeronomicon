@@ -144,11 +144,16 @@ detect_boot_partition() {
     opts="$(mount | awk -v mp="${BOOT_MOUNT_POINT}" '$3 == mp {print $6}' | tr -d '()' || true)"
   fi
 
-  if echo "${opts}" | grep -qw "ro"; then
+  if mount_options_have_ro "${opts}"; then
     BOOT_WAS_RW=false
   else
     BOOT_WAS_RW=true
   fi
+}
+
+mount_options_have_ro() {
+  local opts="$1"
+  [[ ",${opts}," == *",ro,"* ]]
 }
 
 ensure_boot_partition_unlocked() {
@@ -157,7 +162,7 @@ ensure_boot_partition_unlocked() {
   fi
 
   if command -v findmnt >/dev/null 2>&1; then
-    if findmnt -n -o OPTIONS "${BOOT_MOUNT_POINT}" | grep -qw "ro"; then
+    if mount_options_have_ro "$(findmnt -n -o OPTIONS "${BOOT_MOUNT_POINT}")"; then
       log "Boot partition is read-only; remounting ${BOOT_MOUNT_POINT} read-write."
       "${SUDO[@]}" mount -o remount,rw "${BOOT_MOUNT_POINT}"
     else
