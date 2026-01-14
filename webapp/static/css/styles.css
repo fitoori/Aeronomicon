@@ -195,6 +195,19 @@ body.is-loading {
   transition: transform 0.15s ease, border-color 0.2s ease;
 }
 
+.menu-action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.menu-action--icon {
+  width: auto;
+  min-width: 44px;
+  padding: 10px 0;
+  text-align: center;
+}
+
 .menu-action:hover {
   transform: translateY(-1px);
   border-color: rgba(248, 113, 113, 0.7);
