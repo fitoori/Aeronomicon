@@ -53,7 +53,7 @@ from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple, 
 _missing: List[str] = []
 
 try:
-    from flask import Flask, Response, jsonify, render_template
+    from flask import Flask, Response, jsonify, render_template, request
     from werkzeug.serving import WSGIRequestHandler, make_server
 except Exception:  # pragma: no cover
     _missing.append("flask")
@@ -392,6 +392,7 @@ class OnicsRuntime:
     login_message: str = ""
     engaged: bool = False
     restart_failures: int = 0
+    legacy_backend: bool = False
 
 
 @dataclasses.dataclass
@@ -1353,6 +1354,17 @@ class OnicsController:
         t.start()
         return True, "STARTING"
 
+    def set_legacy_backend(self, enabled: bool) -> Tuple[bool, str]:
+        with self._lock:
+            self._runtime.legacy_backend = bool(enabled)
+            running = self._runtime.state in ("STARTING", "RUNNING")
+
+        status = "ENABLED" if enabled else "DISABLED"
+        suffix = " (applies next start)" if running else ""
+        self._append_log(f"LEGACY BACKEND {status}{suffix}")
+        self._broker.publish("state", self.snapshot())
+        return True, f"Legacy backend {status.lower()}{suffix}"
+
     def stop_onics(self) -> Tuple[bool, str]:
         with self._lock:
             st = self._runtime.state
@@ -1719,14 +1731,19 @@ class OnicsController:
             self._ssh_close()
             return
 
+        with self._lock:
+            legacy_backend = self._runtime.legacy_backend
+
         # Start ONICS-T in the foreground but capture PID early.
         # - PYTHONUNBUFFERED forces line-buffering.
         # - Writes PID into /tmp/onics-t.pid for deterministic stop.
         # - Uses 2>&1 to merge stderr into stdout for unified log stream.
+        legacy_flag = "--legacy" if legacy_backend else ""
+        onics_args = f"{REMOTE_ONICS_T_PATH} {legacy_flag}".strip()
         remote_cmd = (
             "bash -lc 'set -euo pipefail; "
             "export PYTHONUNBUFFERED=1; "
-            f"python3 -u {REMOTE_ONICS_T_PATH} 2>&1 & "
+            f"python3 -u {onics_args} 2>&1 & "
             "PID=$!; "
             f"echo $PID > {REMOTE_PIDFILE}; "
             "echo __ONICS_PID__:${PID}; "
@@ -1854,6 +1871,16 @@ def api_engage() -> Response:
 @app.post("/api/disengage")
 def api_disengage() -> Response:
     ok, msg = controller.stop_onics()
+    return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
+
+
+@app.post("/api/onics/legacy")
+def api_onics_legacy() -> Response:
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get("enabled")
+    if enabled is None:
+        return jsonify({"ok": False, "msg": "Missing 'enabled' flag"}), 400
+    ok, msg = controller.set_legacy_backend(bool(enabled))
     return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
 
 

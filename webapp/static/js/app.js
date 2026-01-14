@@ -10,6 +10,7 @@ const logoMenuButton = document.getElementById("logo-menu-button");
 const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
 const monochromeToggle = document.getElementById("monochrome-toggle");
+const legacyBackendToggle = document.getElementById("legacy-backend-toggle");
 const lteBanner = document.getElementById("lte-banner");
 const onicsState = document.querySelector("#onics-state .status-strip__value");
 const onicsRuntime = document.getElementById("onics-runtime");
@@ -80,6 +81,7 @@ let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
 let isMonochromeMode = false;
+let isLegacyBackend = false;
 let connectionStatus = "ok";
 let latestSnapshot = null;
 let telemetryLogExpanded = false;
@@ -184,6 +186,16 @@ function setMonochromeMode(enabled) {
   }
   drawAllLoadGraphs();
   drawAllMemoryGraphs();
+}
+
+function setLegacyBackendMode(enabled) {
+  isLegacyBackend = enabled;
+  if (legacyBackendToggle) {
+    legacyBackendToggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+    legacyBackendToggle.textContent = enabled
+      ? "Disable legacy backend"
+      : "Enable legacy backend";
+  }
 }
 
 function getGraphColor(token, fallback) {
@@ -948,6 +960,9 @@ function updateSnapshot(snapshot, options = {}) {
     onicsState.textContent = onics.state;
   }
   renderOnicsRuntime(onics);
+  if (onics && typeof onics.legacy_backend === "boolean") {
+    setLegacyBackendMode(onics.legacy_backend);
+  }
   if (startupFails) {
     const restartFails = Number.isFinite(onics.restart_failures)
       ? onics.restart_failures
@@ -1149,6 +1164,19 @@ async function sendCommand(path) {
   return res.json();
 }
 
+async function sendJson(path, payload) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.msg || "Command failed");
+  }
+  return res.json();
+}
+
 async function fetchServiceLogs(service) {
   const res = await fetch(`/api/services/${service}/logs`);
   if (!res.ok) {
@@ -1332,6 +1360,21 @@ if (monochromeToggle) {
   monochromeToggle.addEventListener("click", () => {
     setMonochromeMode(!isMonochromeMode);
     setLogoMenuOpen(false);
+  });
+}
+
+if (legacyBackendToggle) {
+  legacyBackendToggle.addEventListener("click", async () => {
+    legacyBackendToggle.disabled = true;
+    try {
+      const data = await sendJson("/api/onics/legacy", { enabled: !isLegacyBackend });
+      updateSnapshot(data.snapshot);
+    } catch (err) {
+      appendLog(`LEGACY BACKEND FAILED: ${err.message}`);
+    } finally {
+      legacyBackendToggle.disabled = false;
+      setLogoMenuOpen(false);
+    }
   });
 }
 
