@@ -904,6 +904,7 @@ main() {
     prompt_service_replacement
   else
     log "Skipping service installation on non-vehicle host."
+    prompt_webapp_install
   fi
 
   # Run PiSugar checks last to avoid interfering with the update sequence.
