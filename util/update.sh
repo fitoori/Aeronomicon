@@ -58,6 +58,21 @@ PISUGAR_MODEL=""
 PISUGAR_I2C_BUS=""
 PISUGAR_BATTERY_PCT=""
 
+# --- Navio2/PiSugar I2C coexistence policy -----------------------------------
+# Navio2 uses the primary Raspberry Pi I2C controller (/dev/i2c-1). Leave it alone.
+# PiSugar must be moved to a dedicated bus (typically i2c-gpio on free pins).
+#
+# These can be overridden via environment variables for field flexibility:
+#   NAVIO2_RESERVED_I2C_BUS, PISUGAR_DEDICATED_I2C_BUS, PISUGAR_I2C_GPIO_SDA,
+#   PISUGAR_I2C_GPIO_SCL, PISUGAR_I2C_GPIO_DELAY_US, PISUGAR_DISABLE_IF_ON_RESERVED_BUS
+NAVIO2_RESERVED_I2C_BUS="${NAVIO2_RESERVED_I2C_BUS:-1}"
+PISUGAR_DEDICATED_I2C_BUS="${PISUGAR_DEDICATED_I2C_BUS:-3}"
+# Navio2 docs note GPIO17/GPIO18 are available on the UART header. Default to those.
+PISUGAR_I2C_GPIO_SDA="${PISUGAR_I2C_GPIO_SDA:-17}"        # BCM numbering (physical pin 11)
+PISUGAR_I2C_GPIO_SCL="${PISUGAR_I2C_GPIO_SCL:-18}"        # BCM numbering (physical pin 12)
+PISUGAR_I2C_GPIO_DELAY_US="${PISUGAR_I2C_GPIO_DELAY_US:-2}"  # ~100kHz conservative
+PISUGAR_DISABLE_IF_ON_RESERVED_BUS="${PISUGAR_DISABLE_IF_ON_RESERVED_BUS:-true}"
+
 check_hostname() {
   local current_hostname=""
   if command -v hostname >/dev/null 2>&1; then
@@ -444,40 +459,137 @@ dump_cmd() {
 
 # --- PiSugar support ---------------------------------------------------------
 
+boot_config_txt_path() {
+  # Prefer detected boot mount point, but fall back to common locations.
+  local p=""
+  if [[ -n "${BOOT_MOUNT_POINT}" && -f "${BOOT_MOUNT_POINT}/config.txt" ]]; then
+    p="${BOOT_MOUNT_POINT}/config.txt"
+  elif [[ -f "/boot/config.txt" ]]; then
+    p="/boot/config.txt"
+  elif [[ -f "/boot/firmware/config.txt" ]]; then
+    p="/boot/firmware/config.txt"
+  fi
+  echo "${p}"
+}
+
+validate_pisugar_i2c_policy() {
+  [[ "${FULL_UPDATE}" == true ]] || return 0
+
+  local v val
+  for v in NAVIO2_RESERVED_I2C_BUS PISUGAR_DEDICATED_I2C_BUS PISUGAR_I2C_GPIO_SDA PISUGAR_I2C_GPIO_SCL PISUGAR_I2C_GPIO_DELAY_US; do
+    val="${!v}"
+    if [[ -z "${val}" || ! "${val}" =~ ^[0-9]+$ ]]; then
+      die "${v} must be a non-empty integer; got '${val:-<empty>}'"
+    fi
+  done
+
+  if [[ "${PISUGAR_DEDICATED_I2C_BUS}" == "${NAVIO2_RESERVED_I2C_BUS}" ]]; then
+    die "PiSugar dedicated I2C bus (${PISUGAR_DEDICATED_I2C_BUS}) must not equal Navio2 reserved bus (${NAVIO2_RESERVED_I2C_BUS})."
+  fi
+  if (( PISUGAR_DEDICATED_I2C_BUS == 0 )); then
+    die "PiSugar dedicated I2C bus must be non-zero (device tree overlay requirement)."
+  fi
+  if (( PISUGAR_I2C_GPIO_SDA == PISUGAR_I2C_GPIO_SCL )); then
+    die "PiSugar SDA/SCL GPIO pins must be different (both set to ${PISUGAR_I2C_GPIO_SDA})."
+  fi
+  case "${PISUGAR_DISABLE_IF_ON_RESERVED_BUS}" in
+    true|false) ;;
+    *) die "PISUGAR_DISABLE_IF_ON_RESERVED_BUS must be 'true' or 'false'; got '${PISUGAR_DISABLE_IF_ON_RESERVED_BUS}'" ;;
+  esac
+}
+
+i2c_detect_addr_on_bus() {
+  # Usage: i2c_detect_addr_on_bus <busnum> <addr_hex_2digits>
+  local bus="$1"
+  local addr="$2"
+  [[ "${bus}" =~ ^[0-9]+$ ]] || return 1
+  [[ "${addr}" =~ ^[0-9a-fA-F]{2}$ ]] || return 1
+  [[ -e "/dev/i2c-${bus}" ]] || return 1
+
+  local scan=""
+  scan="$("${SUDO[@]}" timeout 6s i2cdetect -y "${bus}" 2>/dev/null || true)"
+  echo "${scan}" | grep -qiE "(^|[[:space:]])${addr}($|[[:space:]])"
+}
+
+pisugar_detected_on_reserved_bus() {
+  [[ "${FULL_UPDATE}" == true ]] || return 1
+  [[ -e "/dev/i2c-${NAVIO2_RESERVED_I2C_BUS}" ]] || return 1
+  i2c_detect_addr_on_bus "${NAVIO2_RESERVED_I2C_BUS}" "57" && return 0
+  i2c_detect_addr_on_bus "${NAVIO2_RESERVED_I2C_BUS}" "68" && return 0
+  return 1
+}
+
 enable_soft_i2c_bus_if_vehicle() {
-  # Your original script tried to force-enable a software I2C bus.
-  # We keep that capability, but only on WATNE, and we DO NOT reference undefined vars.
-  #
-  # Note: If you have NOT physically wired PiSugar to these pins, this bus will not
-  # show PiSugar addresses. The validation phase below will report what it sees.
+  [[ "${FULL_UPDATE}" == true ]] || return 0
+  validate_pisugar_i2c_policy
 
-  [[ "${FULL_UPDATE}" == true ]] || return
-
-  local config_file="/boot/config.txt"
-  local overlay_line="dtoverlay=i2c-gpio,bus=3,i2c_gpio_sda=4,i2c_gpio_scl=5"
-
-  if [[ ! -f "${config_file}" ]]; then
-    warn "${config_file} not found; skipping soft I2C overlay."
-    return
+  local config_file
+  config_file="$(boot_config_txt_path)"
+  if [[ -z "${config_file}" || ! -f "${config_file}" ]]; then
+    warn "config.txt not found (boot mount '${BOOT_MOUNT_POINT}'); cannot configure i2c-gpio overlay for PiSugar."
+    return 1
   fi
-  if ! command -v raspi-config >/dev/null 2>&1; then
-    warn "raspi-config not found; skipping I2C enablement steps."
-    return
-  fi
+
+  local overlay_line
+  overlay_line="dtoverlay=i2c-gpio,bus=${PISUGAR_DEDICATED_I2C_BUS},i2c_gpio_sda=${PISUGAR_I2C_GPIO_SDA},i2c_gpio_scl=${PISUGAR_I2C_GPIO_SCL},i2c_gpio_delay_us=${PISUGAR_I2C_GPIO_DELAY_US}"
 
   if ! grep -qxF "${overlay_line}" "${config_file}" 2>/dev/null; then
     local backup_path="${config_file}.bak.$(date +%Y%m%d%H%M%S)"
     log "Backing up ${config_file} to ${backup_path}."
     "${SUDO[@]}" cp "${config_file}" "${backup_path}"
-    log "Adding soft I2C overlay (bus 3) to ${config_file}."
+    log "Adding soft I2C overlay (bus ${PISUGAR_DEDICATED_I2C_BUS}) to ${config_file}."
     printf '%s\n' "${overlay_line}" | "${SUDO[@]}" tee -a "${config_file}" >/dev/null
-    warn "Soft I2C overlay added. A reboot may be required before /dev/i2c-3 is available."
+    warn "PiSugar dedicated i2c-gpio overlay added. A reboot may be required before /dev/i2c-${PISUGAR_DEDICATED_I2C_BUS} is available."
   else
     log "Soft I2C overlay already present."
   fi
 
-  log "Ensuring Raspberry Pi I2C interface is enabled via raspi-config."
-  "${SUDO[@]}" raspi-config nonint do_i2c 0 || warn "raspi-config I2C enablement step returned non-zero."
+  ensure_kernel_i2c_modules
+
+  # Best-effort: try to activate overlay at runtime (avoids reboot if dtoverlay exists).
+  if [[ ! -e "/dev/i2c-${PISUGAR_DEDICATED_I2C_BUS}" ]] && command -v dtoverlay >/dev/null 2>&1; then
+    log "Attempting runtime dtoverlay load for PiSugar i2c-gpio (bus=${PISUGAR_DEDICATED_I2C_BUS}, sda=${PISUGAR_I2C_GPIO_SDA}, scl=${PISUGAR_I2C_GPIO_SCL})."
+    "${SUDO[@]}" dtoverlay i2c-gpio \
+      "bus=${PISUGAR_DEDICATED_I2C_BUS}" \
+      "i2c_gpio_sda=${PISUGAR_I2C_GPIO_SDA}" \
+      "i2c_gpio_scl=${PISUGAR_I2C_GPIO_SCL}" \
+      "i2c_gpio_delay_us=${PISUGAR_I2C_GPIO_DELAY_US}" >/dev/null 2>&1 || true
+    ensure_kernel_i2c_modules
+  fi
+
+  if [[ -e "/dev/i2c-${PISUGAR_DEDICATED_I2C_BUS}" ]]; then
+    log "Dedicated PiSugar I2C bus is available: /dev/i2c-${PISUGAR_DEDICATED_I2C_BUS}"
+  else
+    warn "Dedicated PiSugar I2C bus /dev/i2c-${PISUGAR_DEDICATED_I2C_BUS} not present yet (reboot required if only config.txt was changed)."
+  fi
+
+  if command -v raspi-config >/dev/null 2>&1; then
+    log "Ensuring Raspberry Pi I2C interface is enabled via raspi-config."
+    "${SUDO[@]}" raspi-config nonint do_i2c 0 || warn "raspi-config I2C enablement step returned non-zero."
+  else
+    warn "raspi-config not found; skipping raspi-config I2C enablement."
+  fi
+}
+
+ensure_pisugar_dedicated_i2c_bus_or_reboot() {
+  # Returns:
+  #   0: /dev/i2c-${PISUGAR_DEDICATED_I2C_BUS} exists now
+  #   2: config was ensured but reboot is still required for the bus node to appear
+  #   1: cannot configure (e.g., config.txt missing)
+  [[ "${FULL_UPDATE}" == true ]] || return 0
+  validate_pisugar_i2c_policy
+
+  local rc=0
+  enable_soft_i2c_bus_if_vehicle || rc=$?
+  ensure_kernel_i2c_modules
+
+  if [[ -e "/dev/i2c-${PISUGAR_DEDICATED_I2C_BUS}" ]]; then
+    return 0
+  fi
+  if [[ "${rc}" -ne 0 ]]; then
+    return 1
+  fi
+  return 2
 }
 
 ensure_kernel_i2c_modules() {
@@ -569,9 +681,25 @@ find_pisugar3_bus() {
   # PiSugar 3 Power Manager occupies 0x57 & 0x68.
   # We treat presence of 0x57 as the primary indicator.
   local dev bus scan
+
+  # Prefer the dedicated PiSugar bus first.
+  if [[ -e "/dev/i2c-${PISUGAR_DEDICATED_I2C_BUS}" ]]; then
+    if i2c_detect_addr_on_bus "${PISUGAR_DEDICATED_I2C_BUS}" "57"; then
+      echo "${PISUGAR_DEDICATED_I2C_BUS}"
+      return 0
+    fi
+  fi
+
   shopt -s nullglob
   for dev in /dev/i2c-*; do
     bus="${dev##*/i2c-}"
+    # Vehicle policy: never bind PiSugar to Navio2's bus.
+    if [[ "${FULL_UPDATE}" == true && "${bus}" == "${NAVIO2_RESERVED_I2C_BUS}" ]]; then
+      continue
+    fi
+    if [[ "${bus}" == "${PISUGAR_DEDICATED_I2C_BUS}" ]]; then
+      continue
+    fi
     scan="$("${SUDO[@]}" i2cdetect -y "${bus}" 2>/dev/null || true)"
     if echo "${scan}" | grep -qw "57"; then
       echo "${bus}"
@@ -620,6 +748,9 @@ update_pisugar_config_json_bus() {
   local bus="$1"
   local cfg="/etc/pisugar-server/config.json"
 
+  if [[ "${FULL_UPDATE}" == true && "${bus}" == "${NAVIO2_RESERVED_I2C_BUS}" ]]; then
+    die "Refusing to configure PiSugar on reserved I2C bus ${bus} (Navio2 uses this bus)."
+  fi
   if [[ ! -f "${cfg}" ]]; then
     warn "${cfg} not found; skipping i2c_bus fix."
     return 0
@@ -831,6 +962,30 @@ pisugar_repair_and_validate() {
     return 1
   fi
 
+  # 1b) Enforce dedicated PiSugar bus (so Navio2 keeps bus 1).
+  local ded_state=0
+  ensure_pisugar_dedicated_i2c_bus_or_reboot || ded_state=$?
+  if [[ "${ded_state}" == "2" ]]; then
+    pisugar_collect_failure_bundle
+    warn "PiSugar dedicated I2C bus not active yet (/dev/i2c-${PISUGAR_DEDICATED_I2C_BUS}). Reboot required."
+
+    local response="n"
+    if [[ -r /dev/tty ]]; then
+      read -r -p "Reboot now to activate PiSugar dedicated I2C bus and retry PiSugar validation? [y/N] " response </dev/tty || response="n"
+    fi
+    if [[ "${response}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+      log "Rebooting now (required for PiSugar dedicated bus activation). Re-run update after boot."
+      "${SUDO[@]}" shutdown -r now "Reboot required to activate PiSugar dedicated I2C bus"
+      exit 0
+    fi
+    warn "Cannot proceed with PiSugar remediation until dedicated I2C bus is active."
+    return 1
+  elif [[ "${ded_state}" != "0" ]]; then
+    pisugar_collect_failure_bundle
+    warn "Failed to configure PiSugar dedicated I2C bus (config.txt missing or inaccessible)."
+    return 1
+  fi
+
   # 2) Ensure pisugar-server has I2C permissions.
   ensure_pisugar_service_i2c_permissions
 
@@ -838,6 +993,15 @@ pisugar_repair_and_validate() {
   local bus
   bus="$(find_pisugar3_bus || true)"
   if [[ -z "${bus}" ]]; then
+    if pisugar_detected_on_reserved_bus; then
+      warn "PiSugar detected on RESERVED bus /dev/i2c-${NAVIO2_RESERVED_I2C_BUS}. Navio2 owns that bus; PiSugar must be rewired to the dedicated bus."
+      warn "Expected dedicated wiring: SDA=GPIO${PISUGAR_I2C_GPIO_SDA} (pin 11), SCL=GPIO${PISUGAR_I2C_GPIO_SCL} (pin 12), plus 3V3+GND."
+      if [[ "${PISUGAR_DISABLE_IF_ON_RESERVED_BUS}" == "true" ]]; then
+        warn "Stopping and disabling pisugar-server.service to keep Navio2 I2C bus quiet."
+        "${SUDO[@]}" systemctl stop pisugar-server.service >/dev/null 2>&1 || true
+        "${SUDO[@]}" systemctl disable pisugar-server.service >/dev/null 2>&1 || true
+      fi
+    fi
     pisugar_collect_failure_bundle
     warn "PiSugar3 I2C address 0x57 not detected on any /dev/i2c-* bus. Software remediation exhausted."
     return 1
@@ -963,6 +1127,28 @@ main() {
 
   ensure_boot_partition_unlocked
 
+  # Vehicle policy: configure PiSugar to use a dedicated I2C bus before any other work.
+  if [[ "${FULL_UPDATE}" == true ]]; then
+    require_command timeout
+    local pre_bus_rc=0
+    ensure_pisugar_dedicated_i2c_bus_or_reboot || pre_bus_rc=$?
+    if [[ "${pre_bus_rc}" == "2" ]]; then
+      warn "Dedicated PiSugar I2C bus requires reboot to become available (/dev/i2c-${PISUGAR_DEDICATED_I2C_BUS})."
+      local response="n"
+      if [[ -r /dev/tty ]]; then
+        read -r -p "Reboot now to activate PiSugar dedicated I2C bus? [y/N] " response </dev/tty || response="n"
+      fi
+      if [[ "${response}" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+        log "Rebooting now. Re-run update after boot."
+        "${SUDO[@]}" shutdown -r now "Reboot required to activate PiSugar dedicated I2C bus"
+        exit 0
+      fi
+      warn "Continuing without reboot; PiSugar validation will likely fail until rebooted."
+    elif [[ "${pre_bus_rc}" != "0" ]]; then
+      warn "Could not prepare PiSugar dedicated I2C bus (continuing; Navio2 will still be protected by service disablement if PiSugar is on bus 1)."
+    fi
+  fi
+
   # Now confirm we have non-wwan internet for update.
   check_non_wwan_internet
 
@@ -1000,9 +1186,6 @@ main() {
 
   # Run PiSugar checks last to avoid interfering with the update sequence.
   if [[ "${FULL_UPDATE}" == true ]]; then
-    # Try to ensure soft I2C is configured (vehicle-only); does not hard-fail if not applicable.
-    enable_soft_i2c_bus_if_vehicle || true
-
     # Validate PiSugar server path (end-to-end I2C read via server).
     ensure_pisugar_validated || true
 
