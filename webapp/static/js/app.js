@@ -83,7 +83,8 @@ let rebootPending = false;
 let rebootAwaitingLoss = false;
 let isMonochromeMode = false;
 let isLegacyBackend = false;
-let legacyScriptPath = "/home/pi/vision_to_mavros/scripts/t265_precland_apriltags.py";
+let legacyScriptPath =
+  "/home/pi/vision_to_mavros/scripts/t265_precland_apriltags.py --connect=127.0.0.1:14550 --baudrate=921600";
 let connectionStatus = "ok";
 let latestSnapshot = null;
 let telemetryLogExpanded = false;
