@@ -89,6 +89,7 @@ MOSH_ENABLED_ENV = os.environ.get("WATNE_MOSH_ENABLE", "1")
 
 # Remote script path (as provided)
 REMOTE_ONICS_T_PATH = "~/Aeronomicon/onics-t.py"
+LEGACY_SCRIPT_DEFAULT = "/home/pi/vision_to_mavros/scripts/t265_precland_apriltags.py"
 REMOTE_PIDFILE = "/tmp/onics-t.pid"
 
 # UI / streaming settings
@@ -393,6 +394,8 @@ class OnicsRuntime:
     engaged: bool = False
     restart_failures: int = 0
     legacy_backend: bool = False
+    legacy_script_path: str = LEGACY_SCRIPT_DEFAULT
+    active_script_path: str = REMOTE_ONICS_T_PATH
 
 
 @dataclasses.dataclass
@@ -1344,6 +1347,7 @@ class OnicsController:
             self._runtime.last_ssh_ok_mono = 0.0
             self._runtime.login_required = False
             self._runtime.login_message = ""
+            self._runtime.active_script_path = REMOTE_ONICS_T_PATH
             if not auto_restart:
                 self._restart_events.clear()
                 self._runtime.restart_failures = 0
@@ -1364,6 +1368,19 @@ class OnicsController:
         self._append_log(f"LEGACY BACKEND {status}{suffix}")
         self._broker.publish("state", self.snapshot())
         return True, f"Legacy backend {status.lower()}{suffix}"
+
+    def set_legacy_script_path(self, path: str) -> Tuple[bool, str]:
+        normalized = path.strip()
+        if not normalized:
+            return False, "Legacy script path cannot be empty"
+        with self._lock:
+            self._runtime.legacy_script_path = normalized
+            running = self._runtime.state in ("STARTING", "RUNNING")
+
+        suffix = " (applies next start)" if running else ""
+        self._append_log(f"LEGACY SCRIPT PATH SET: {normalized}{suffix}")
+        self._broker.publish("state", self.snapshot())
+        return True, f"Legacy script path updated{suffix}"
 
     def stop_onics(self) -> Tuple[bool, str]:
         with self._lock:
@@ -1570,7 +1587,9 @@ class OnicsController:
                 self._set_state("ERROR", "No PID available to stop ONICS-T")
                 return False, "No PID available"
 
-            expected_script = os.path.basename(REMOTE_ONICS_T_PATH)
+            with self._lock:
+                expected_path = self._runtime.active_script_path or REMOTE_ONICS_T_PATH
+            expected_script = os.path.basename(expected_path)
             try:
                 check_cmd = f"bash -lc 'ps -p {pid} -o args= 2>/dev/null || true'"
                 _stdin, stdout, _stderr = client.exec_command(check_cmd, get_pty=False)
@@ -1707,11 +1726,18 @@ class OnicsController:
         self._append_log(f"SSH CONNECTED: {SSH_USER}@{TAILNET_HOSTNAME}:{SSH_PORT} ({ms} ms)")
         self._set_login_prompt(False, "")
 
+        with self._lock:
+            legacy_backend = self._runtime.legacy_backend
+            legacy_script_path = self._runtime.legacy_script_path
+            script_path = legacy_script_path if legacy_backend else REMOTE_ONICS_T_PATH
+            self._runtime.active_script_path = script_path
+
         # Remote preflight: ensure python3 and script exist.
+        script_arg = shlex.quote(script_path)
         preflight_cmd = (
             "bash -lc 'set -euo pipefail; "
             "command -v python3 >/dev/null 2>&1; "
-            f"test -f {REMOTE_ONICS_T_PATH}; "
+            f"test -f {script_arg}; "
             "echo OK'"
         )
         try:
@@ -1731,15 +1757,11 @@ class OnicsController:
             self._ssh_close()
             return
 
-        with self._lock:
-            legacy_backend = self._runtime.legacy_backend
-
         # Start ONICS-T in the foreground but capture PID early.
         # - PYTHONUNBUFFERED forces line-buffering.
         # - Writes PID into /tmp/onics-t.pid for deterministic stop.
         # - Uses 2>&1 to merge stderr into stdout for unified log stream.
-        legacy_flag = "--legacy" if legacy_backend else ""
-        onics_args = f"{REMOTE_ONICS_T_PATH} {legacy_flag}".strip()
+        onics_args = script_arg
         remote_cmd = (
             "bash -lc 'set -euo pipefail; "
             "export PYTHONUNBUFFERED=1; "
@@ -1881,6 +1903,16 @@ def api_onics_legacy() -> Response:
     if enabled is None:
         return jsonify({"ok": False, "msg": "Missing 'enabled' flag"}), 400
     ok, msg = controller.set_legacy_backend(bool(enabled))
+    return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
+
+
+@app.post("/api/onics/legacy/script")
+def api_onics_legacy_script() -> Response:
+    payload = request.get_json(silent=True) or {}
+    path = payload.get("path")
+    if not isinstance(path, str):
+        return jsonify({"ok": False, "msg": "Missing 'path' string"}), 400
+    ok, msg = controller.set_legacy_script_path(path)
     return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
 
 

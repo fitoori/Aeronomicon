@@ -11,6 +11,7 @@ const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
 const monochromeToggle = document.getElementById("monochrome-toggle");
 const legacyBackendToggle = document.getElementById("legacy-backend-toggle");
+const legacyBackendConfig = document.getElementById("legacy-backend-config");
 const lteBanner = document.getElementById("lte-banner");
 const onicsState = document.querySelector("#onics-state .status-strip__value");
 const onicsRuntime = document.getElementById("onics-runtime");
@@ -82,6 +83,7 @@ let rebootPending = false;
 let rebootAwaitingLoss = false;
 let isMonochromeMode = false;
 let isLegacyBackend = false;
+let legacyScriptPath = "/home/pi/vision_to_mavros/scripts/t265_precland_apriltags.py";
 let connectionStatus = "ok";
 let latestSnapshot = null;
 let telemetryLogExpanded = false;
@@ -963,6 +965,9 @@ function updateSnapshot(snapshot, options = {}) {
   if (onics && typeof onics.legacy_backend === "boolean") {
     setLegacyBackendMode(onics.legacy_backend);
   }
+  if (onics && typeof onics.legacy_script_path === "string") {
+    legacyScriptPath = onics.legacy_script_path;
+  }
   if (startupFails) {
     const restartFails = Number.isFinite(onics.restart_failures)
       ? onics.restart_failures
@@ -1373,6 +1378,32 @@ if (legacyBackendToggle) {
       appendLog(`LEGACY BACKEND FAILED: ${err.message}`);
     } finally {
       legacyBackendToggle.disabled = false;
+      setLogoMenuOpen(false);
+    }
+  });
+}
+
+if (legacyBackendConfig) {
+  legacyBackendConfig.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const current = legacyScriptPath || "";
+    const nextPath = window.prompt("Legacy script path:", current);
+    if (nextPath === null) {
+      return;
+    }
+    const trimmed = nextPath.trim();
+    if (!trimmed) {
+      appendLog("LEGACY SCRIPT PATH FAILED: path cannot be empty");
+      return;
+    }
+    legacyBackendConfig.disabled = true;
+    try {
+      const data = await sendJson("/api/onics/legacy/script", { path: trimmed });
+      updateSnapshot(data.snapshot);
+    } catch (err) {
+      appendLog(`LEGACY SCRIPT PATH FAILED: ${err.message}`);
+    } finally {
+      legacyBackendConfig.disabled = false;
       setLogoMenuOpen(false);
     }
   });
