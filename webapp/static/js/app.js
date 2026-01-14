@@ -9,6 +9,7 @@ const connectionPill = document.getElementById("connection-pill");
 const logoMenuButton = document.getElementById("logo-menu-button");
 const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
+const shutdownBtn = document.getElementById("shutdown-btn");
 const monochromeToggle = document.getElementById("monochrome-toggle");
 const legacyBackendToggle = document.getElementById("legacy-backend-toggle");
 const legacyBackendConfig = document.getElementById("legacy-backend-config");
@@ -1141,6 +1142,9 @@ function updateSnapshot(snapshot, options = {}) {
   if (rebootBtn) {
     rebootBtn.disabled = !restartReady;
   }
+  if (shutdownBtn) {
+    shutdownBtn.disabled = !restartReady;
+  }
 }
 
 function appendLog(line) {
@@ -1331,6 +1335,26 @@ rebootBtn?.addEventListener("click", async () => {
     if (!rebootPending) {
       rebootBtn.disabled = false;
     }
+  }
+});
+
+shutdownBtn?.addEventListener("click", async () => {
+  const shutdownCode = window.prompt(
+    "Shutdown the vehicle now?\n\nWarning: Do not initiate a restart if the vehicle is in flight.\nWarning: If the vehicle is not physically present, a shutdown may result in an unrecoverable situation.\n\nEnter shutdown code to proceed:"
+  );
+  if (shutdownCode !== "000shutdown0") {
+    return;
+  }
+  shutdownBtn.disabled = true;
+  setLogoMenuOpen(false);
+  try {
+    const data = await sendCommand("/api/shutdown");
+    updateSnapshot(data.snapshot);
+    appendLog("VEHICLE SHUTDOWN REQUESTED: shutdown now");
+  } catch (err) {
+    appendLog(`VEHICLE SHUTDOWN FAILED: ${err.message}`);
+  } finally {
+    shutdownBtn.disabled = false;
   }
 });
 
