@@ -91,7 +91,7 @@ MOSH_ENABLED_ENV = os.environ.get("WATNE_MOSH_ENABLE", "1")
 REMOTE_ONICS_T_PATH = "~/Aeronomicon/onics-t.py"
 LEGACY_SCRIPT_DEFAULT = (
     "/home/pi/vision_to_mavros/scripts/t265_precland_apriltags.py "
-    "--connect=127.0.0.1:14550 "
+    "--connect=127.0.0.1:14551 "
     "--baudrate=921600"
 )
 REMOTE_PIDFILE = "/tmp/onics-t.pid"
