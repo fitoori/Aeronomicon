@@ -4,11 +4,12 @@ After=network.target
 
 [Service]
 
-# uncomment below line if you're using a SiK Radio
+# uncomment below line if you're using a SiK Radio directly (unfiltered)
 # ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=/dev/ttyUSB0 --no-state --daemon
 
 # tailnet GCS endpoint
-ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=udp://0.0.0.0:14552 --no-state --daemon
+# + local SiK bridge feed (filtered by sik-bridge.service, if enabled)
+ExecStart=/home/pi/.local/bin/mavproxy.py  --master=udp:127.0.0.1:14550 --out=udp://217.0.0.1:14551 --out=udp://0.0.0.0:14552 --out=udp://127.0.0.1:14600 --in=udp:127.0.0.1:14601 --no-state --daemon
 
 WorkingDirectory=/home/pi/
 StandardOutput=inherit

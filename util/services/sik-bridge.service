@@ -1,0 +1,13 @@
+[Unit]
+Description=Filtered SiK MAVLink Bridge
+After=network.target mavproxy.service
+Requires=mavproxy.service
+
+[Service]
+Environment=SIK_ALLOWLIST=HEARTBEAT,SYS_STATUS,STATUSTEXT,COMMAND_ACK,EXTENDED_SYS_STATE,SYSTEM_TIME,POWER_STATUS,BATTERY_STATUS
+ExecStart=/usr/bin/env python3 /home/pi/Aeronomicon/util/sik-bridge.py --udp-in 127.0.0.1:14600 --udp-out 127.0.0.1:14601 --serial /dev/ttyUSB0 --baud 57600
+Restart=always
+User=pi
+
+[Install]
+WantedBy=multi-user.target
