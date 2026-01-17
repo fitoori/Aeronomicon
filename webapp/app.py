@@ -125,6 +125,7 @@ SSH_CONNECT_TIMEOUT_S = float(os.environ.get("SSH_CONNECT_TIMEOUT_S", "5.0"))
 SSH_BANNER_TIMEOUT_S = float(os.environ.get("SSH_BANNER_TIMEOUT_S", "5.0"))
 SSH_BANNER_TIMEOUT_RETRY_S = float(os.environ.get("SSH_BANNER_TIMEOUT_RETRY_S", "20.0"))
 SSH_AUTH_TIMEOUT_S = float(os.environ.get("SSH_AUTH_TIMEOUT_S", "12.0"))
+SSH_COMMAND_TIMEOUT_S = float(os.environ.get("SSH_COMMAND_TIMEOUT_S", "6.0"))
 
 # Process stop behavior
 STOP_GRACE_S = float(os.environ.get("STOP_GRACE_S", "3.0"))
@@ -197,6 +198,37 @@ def _daemonize(log_path: Optional[str]) -> None:
         with open("/dev/null", "ab", buffering=0) as devnull_out:
             os.dup2(devnull_out.fileno(), sys.stdout.fileno())
             os.dup2(devnull_out.fileno(), sys.stderr.fileno())
+
+
+def exec_remote_command(
+    client: paramiko.SSHClient,
+    cmd: str,
+    *,
+    timeout_s: float,
+) -> Tuple[int, str, str, str]:
+    channel: Optional[paramiko.Channel] = None
+    try:
+        _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False, timeout=timeout_s)
+        channel = stdout.channel
+        channel.settimeout(timeout_s)
+        out = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        exit_status = channel.recv_exit_status()
+        return exit_status, out, err, ""
+    except socket.timeout:
+        if channel is not None:
+            try:
+                channel.close()
+            except Exception:
+                pass
+        return -1, "", "", f"Timeout after {timeout_s:.1f}s"
+    except Exception as exc:
+        if channel is not None:
+            try:
+                channel.close()
+            except Exception:
+                pass
+        return -1, "", "", f"{type(exc).__name__}: {exc}"
 
 
 def safe_json_dumps(obj: Any) -> str:
@@ -794,10 +826,15 @@ class OnicsController:
             "echo \"---\"; "
             "cat /proc/net/dev 2>/dev/null'"
         )
-        _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
-        output = stdout.read().decode("utf-8", errors="replace")
-        err = stderr.read().decode("utf-8", errors="replace")
-        _ = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+        exit_status, output, err, exec_error = exec_remote_command(
+            client,
+            cmd,
+            timeout_s=SSH_COMMAND_TIMEOUT_S,
+        )
+        if exec_error:
+            raise RuntimeError(f"Remote system stats command failed: {exec_error}")
+        if exit_status != 0:
+            raise RuntimeError(f"Remote system stats command exited with status {exit_status}")
         if err:
             output = output + ("\n" if output else "") + err
         return self._parse_remote_system_output(output)
@@ -828,8 +865,18 @@ class OnicsController:
             created = True
 
         stats = self._blank_system_stats()
+        stats_ok = False
         try:
             stats = self._fetch_remote_system_stats(client)
+            stats_ok = True
+        except Exception as exc:
+            self._mark_failure()
+            self._append_log(f"SYSTEM STATS ERROR: {type(exc).__name__}: {exc}")
+            if self._system_backoff_s <= 0.0:
+                self._system_backoff_s = max(3.0, SYSTEM_STATS_CHECK_S)
+            else:
+                self._system_backoff_s = min(self._system_backoff_s * 2.0, 60.0)
+            self._system_backoff_until = monotonic_s() + self._system_backoff_s
         finally:
             if created and client is not None:
                 try:
@@ -861,8 +908,9 @@ class OnicsController:
 
         with self._lock:
             self._autopilot.system = stats
-        self._system_backoff_s = 0.0
-        self._system_backoff_until = 0.0
+        if stats_ok and self._system_backoff_s > 0.0:
+            self._system_backoff_s = 0.0
+            self._system_backoff_until = 0.0
 
     @staticmethod
     def _parse_lte_signal_output(output: str) -> Tuple[Optional[float], Optional[float]]:
@@ -1090,10 +1138,13 @@ class OnicsController:
                 f"{shlex.quote(unit)} "
                 "--property=ActiveState,SubState,Description --no-pager"
             )
-            _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
-            out = stdout.read().decode("utf-8", errors="replace")
-            err = stderr.read().decode("utf-8", errors="replace")
-            exit_status = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+            exit_status, out, err, exec_error = exec_remote_command(
+                client,
+                cmd,
+                timeout_s=SSH_COMMAND_TIMEOUT_S,
+            )
+            if exec_error:
+                raise RuntimeError(exec_error)
             if exit_status == 0:
                 for line in (out or "").splitlines():
                     key, _, value = line.partition("=")
@@ -1111,10 +1162,14 @@ class OnicsController:
         if active_state == "UNKNOWN":
             try:
                 cmd = f"systemctl is-active {shlex.quote(unit)}"
-                _stdin, stdout, stderr = client.exec_command(cmd, get_pty=False)
-                out = stdout.read().decode("utf-8", errors="replace")
-                err = stderr.read().decode("utf-8", errors="replace")
-                _ = stdout.channel.recv_exit_status()  # type: ignore[union-attr]
+                exit_status, out, err, exec_error = exec_remote_command(
+                    client,
+                    cmd,
+                    timeout_s=SSH_COMMAND_TIMEOUT_S,
+                )
+                if exec_error:
+                    raise RuntimeError(exec_error)
+                _ = exit_status
                 active_state = (out or err or "").strip() or active_state
                 if not detail:
                     detail = f"systemctl is-active: {active_state}"
