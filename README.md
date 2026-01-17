@@ -9,6 +9,23 @@ A collection of scripts and utilities to streamline working with Intel RealSense
 - **uplink.sh** – Bash script to manage an LTE uplink with self-recovery logic and a daily reboot at 01:00.
 - **util/services/mavproxy.service** – Systemd unit file for running MAVProxy as a managed service.
 
+## Estimated Peak Power Consumption (ONICS-T Running)
+
+The figures below are estimates for peak draw when ONICS-T is active (T265 streaming, SiK radio transmitting, LTE modem transmitting, Navio2 + Pi 4B running). Values are based on community measurements and best-available specs, so treat them as planning estimates rather than certified limits.
+
+| Device | Peak power | Peak current @ 5 V |
+| --- | --- | --- |
+| Intel RealSense T265 | ~1.5 W | ~0.30 A |
+| HolyBro SiK radio (100 mW) | ~0.5 W | ~0.10 A |
+| Sierra Wireless 340U LTE modem | ~2.0–2.5 W | ~0.40–0.50 A |
+| Navio2 HAT | ~0.75 W | ~0.15 A |
+| Raspberry Pi 4B | ~7–8 W | ~1.4–1.6 A |
+
+**Estimated total peak power:** 11.75–13.25 W  
+**Estimated total peak current @ 5 V:** 2.35–2.65 A
+
+**PiSugar 3 Plus headroom check:** rated up to 5 V / 3 A (15 W), which should cover the above peak range with margin, assuming the supply can sustain near-3 A output.
+
 ## Diagnostic Tools & Utilities
 
 ### RealSense
