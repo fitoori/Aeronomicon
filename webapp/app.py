@@ -1610,6 +1610,47 @@ class OnicsController:
         self._append_log(f"VEHICLE SHUTDOWN {outcome}: shutdown now{log_detail}")
         return ok, detail or ("Shutting down" if ok else "Shutdown failed")
 
+    def _host_power_action(self, label: str, commands: List[List[str]]) -> Tuple[bool, str]:
+        ok = False
+        detail = ""
+        for cmd in commands:
+            try:
+                p = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                )
+                detail = (p.stderr or p.stdout or "").strip()
+                if p.returncode == 0:
+                    ok = True
+                    break
+            except Exception as e:
+                detail = f"{type(e).__name__}: {e}"
+        outcome = "OK" if ok else "FAILED"
+        log_detail = f" ({detail})" if detail else ""
+        self._append_log(f"HOST DEVICE {label} {outcome}: {' '.join(commands[0])}{log_detail}")
+        return ok, detail or (label.title() if ok else f"{label.title()} failed")
+
+    def reboot_host(self) -> Tuple[bool, str]:
+        return self._host_power_action(
+            "RESTART",
+            [
+                ["sudo", "-n", "reboot", "now"],
+                ["reboot", "now"],
+            ],
+        )
+
+    def shutdown_host(self) -> Tuple[bool, str]:
+        return self._host_power_action(
+            "SHUTDOWN",
+            [
+                ["sudo", "-n", "shutdown", "now"],
+                ["shutdown", "now"],
+            ],
+        )
+
     def _remote_stop(self, pid: Optional[int]) -> Tuple[bool, str]:
         # Attempt to use existing SSH client if present; otherwise reconnect.
         client = None
@@ -2010,6 +2051,18 @@ def api_reboot() -> Response:
 def api_shutdown() -> Response:
     ok, msg = controller.shutdown_vehicle()
     return jsonify({"ok": ok, "msg": msg, "snapshot": controller.snapshot()}), (200 if ok else 409)
+
+
+@app.post("/api/host/reboot")
+def api_host_reboot() -> Response:
+    ok, msg = controller.reboot_host()
+    return jsonify({"ok": ok, "msg": msg}), (200 if ok else 409)
+
+
+@app.post("/api/host/shutdown")
+def api_host_shutdown() -> Response:
+    ok, msg = controller.shutdown_host()
+    return jsonify({"ok": ok, "msg": msg}), (200 if ok else 409)
 
 
 @app.get("/stream")

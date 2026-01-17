@@ -820,6 +820,17 @@ body.is-telemetry-log-compact #telemetry-panel .log-view {
   pointer-events: none;
 }
 
+.shutdown-screen {
+  text-transform: uppercase;
+}
+
+.shutdown-title {
+  font-size: clamp(1.1rem, 2.4vw, 1.6rem);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  max-width: min(820px, 92vw);
+}
+
 .offline-screen {
   position: fixed;
   inset: 0;

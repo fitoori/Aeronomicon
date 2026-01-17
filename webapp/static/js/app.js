@@ -5,11 +5,14 @@ const telemetryLogToggle = document.getElementById("telemetry-log-toggle");
 const loadingScreen = document.getElementById("loading-screen");
 const offlineScreen = document.getElementById("offline-screen");
 const rebootScreen = document.getElementById("reboot-screen");
+const shutdownScreen = document.getElementById("shutdown-screen");
 const connectionPill = document.getElementById("connection-pill");
 const logoMenuButton = document.getElementById("logo-menu-button");
 const logoMenu = document.getElementById("logo-menu");
 const rebootBtn = document.getElementById("reboot-btn");
 const shutdownBtn = document.getElementById("shutdown-btn");
+const hostRebootBtn = document.getElementById("host-reboot-btn");
+const hostShutdownBtn = document.getElementById("host-shutdown-btn");
 const monochromeToggle = document.getElementById("monochrome-toggle");
 const legacyBackendToggle = document.getElementById("legacy-backend-toggle");
 const legacyBackendConfig = document.getElementById("legacy-backend-config");
@@ -82,6 +85,7 @@ const MIN_TELEMETRY_LOG_HEIGHT = 0;
 let engageToggleAction = null;
 let rebootPending = false;
 let rebootAwaitingLoss = false;
+let shutdownPending = false;
 let isMonochromeMode = false;
 let isLegacyBackend = false;
 let legacyScriptPath =
@@ -120,6 +124,15 @@ function setRebootOverlay(visible) {
   }
   rebootScreen.classList.toggle("hidden", !visible);
   rebootScreen.setAttribute("aria-hidden", visible ? "false" : "true");
+  document.body.classList.toggle("is-rebooting", visible);
+}
+
+function setShutdownOverlay(visible) {
+  if (!shutdownScreen) {
+    return;
+  }
+  shutdownScreen.classList.toggle("hidden", !visible);
+  shutdownScreen.setAttribute("aria-hidden", visible ? "false" : "true");
   document.body.classList.toggle("is-rebooting", visible);
 }
 
@@ -950,6 +963,7 @@ function updateSnapshot(snapshot, options = {}) {
     }
   }
   setRebootOverlay(rebootPending);
+  setShutdownOverlay(shutdownPending);
   connectionPill.textContent = health.los
     ? "LINK: LOS"
     : linkDegraded
@@ -1135,7 +1149,8 @@ function updateSnapshot(snapshot, options = {}) {
     setLteBanner(false);
   }
 
-  const restartReady = health.tailscale_ok && health.dns_ok && health.tcp_ok && !rebootPending;
+  const restartReady =
+    health.tailscale_ok && health.dns_ok && health.tcp_ok && !rebootPending && !shutdownPending;
   serviceRestartButtons.forEach((button) => {
     button.disabled = !restartReady;
   });
@@ -1349,12 +1364,52 @@ shutdownBtn?.addEventListener("click", async () => {
   setLogoMenuOpen(false);
   try {
     const data = await sendCommand("/api/shutdown");
+    shutdownPending = true;
+    setShutdownOverlay(true);
     updateSnapshot(data.snapshot);
     appendLog("VEHICLE SHUTDOWN REQUESTED: shutdown now");
   } catch (err) {
     appendLog(`VEHICLE SHUTDOWN FAILED: ${err.message}`);
   } finally {
-    shutdownBtn.disabled = false;
+    if (!shutdownPending) {
+      shutdownBtn.disabled = false;
+    }
+  }
+});
+
+hostRebootBtn?.addEventListener("click", async () => {
+  const shouldRestart = window.confirm(
+    "Restart the host device now?\n\nWarning: This will stop the web console immediately."
+  );
+  if (!shouldRestart) {
+    return;
+  }
+  hostRebootBtn.disabled = true;
+  setLogoMenuOpen(false);
+  try {
+    await sendCommand("/api/host/reboot");
+    appendLog("HOST DEVICE RESTART REQUESTED: reboot now");
+  } catch (err) {
+    appendLog(`HOST DEVICE RESTART FAILED: ${err.message}`);
+    hostRebootBtn.disabled = false;
+  }
+});
+
+hostShutdownBtn?.addEventListener("click", async () => {
+  const shouldShutdown = window.confirm(
+    "Shutdown the host device now?\n\nWarning: This will stop the web console immediately."
+  );
+  if (!shouldShutdown) {
+    return;
+  }
+  hostShutdownBtn.disabled = true;
+  setLogoMenuOpen(false);
+  try {
+    await sendCommand("/api/host/shutdown");
+    appendLog("HOST DEVICE SHUTDOWN REQUESTED: shutdown now");
+  } catch (err) {
+    appendLog(`HOST DEVICE SHUTDOWN FAILED: ${err.message}`);
+    hostShutdownBtn.disabled = false;
   }
 });
 
@@ -1475,6 +1530,9 @@ if (!isLoadOnly) {
     if (rebootPending) {
       rebootAwaitingLoss = false;
       setRebootOverlay(true);
+    }
+    if (shutdownPending) {
+      setShutdownOverlay(true);
     }
   };
 }
