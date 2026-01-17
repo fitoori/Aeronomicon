@@ -865,8 +865,10 @@ class OnicsController:
             created = True
 
         stats = self._blank_system_stats()
+        stats_ok = False
         try:
             stats = self._fetch_remote_system_stats(client)
+            stats_ok = True
         except Exception as exc:
             self._mark_failure()
             self._append_log(f"SYSTEM STATS ERROR: {type(exc).__name__}: {exc}")
@@ -906,7 +908,7 @@ class OnicsController:
 
         with self._lock:
             self._autopilot.system = stats
-        if self._system_backoff_s > 0.0:
+        if stats_ok and self._system_backoff_s > 0.0:
             self._system_backoff_s = 0.0
             self._system_backoff_until = 0.0
 
