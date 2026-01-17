@@ -8,7 +8,6 @@ A collection of scripts and utilities to streamline working with Intel RealSense
 - **apriltags3.py** – Upstream apriltags dependency preserved for compatibility and slightly enhanced/modernized.
 - **uplink.sh** – Bash script to manage an LTE uplink with self-recovery logic and a daily reboot at 01:00.
 - **util/services/mavproxy.service** – Systemd unit file for running MAVProxy as a managed service.
-- **util/sik-bridge.py** – Filtered MAVLink bridge for SiK radios (keeps control/status on serial while leaving full telemetry on UDP).
 
 ## Diagnostic Tools & Utilities
 
@@ -35,7 +34,6 @@ A collection of scripts and utilities to streamline working with Intel RealSense
 - **util/services/webapp.service** – Systemd unit for the webapp.
 - **util/services/webapp-watchdog.service** – Systemd unit for the webapp watchdog.
 - **util/services/webapp-watchdog.timer** – Timer to run the watchdog on a schedule.
-- **util/services/sik-bridge.service** – Systemd unit for the filtered SiK bridge (optional).
 
 ## Legacy Repository Contents
 
