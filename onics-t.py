@@ -24,7 +24,7 @@ import argparse
 import builtins
 from datetime import datetime
 
-# Ensure MAVLink 2.0 is enabled before importing dronekit/pymavlink.
+# Ensure MAVLink 2.0 is enabled before importing pymavlink.
 os.environ.setdefault("MAVLINK20", "1")
 
 import numpy as np
@@ -33,8 +33,6 @@ import cv2
 import pyrealsense2.pyrealsense2 as rs
 import transformations as tf
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from dronekit import connect, VehicleMode
 from pymavlink import mavutil
 
 # ---------- Timestamp all prints ----------
@@ -53,7 +51,7 @@ except ImportError:
     )
 
 try:
-    import psutil  # optional, improves dynamic tuning
+    import psutil  # optional, improves performance snapshots
     _HAVE_PSUTIL = True
 except Exception:
     _HAVE_PSUTIL = False
@@ -94,7 +92,7 @@ home_alt = 180000        # 180 m AMSL -> 180000 mm
 current_time = 0
 
 # Globals set at runtime
-vehicle = None
+mavlink_connection = None
 pipe = None
 
 # pose data confidence: 0x0 - Failed / 0x1 - Low / 0x2 - Medium / 0x3 - High
@@ -283,120 +281,7 @@ def _detect_apriltags(frames, camera_params, image_source):
 # ------------------------------
 # MAVLink helpers
 # ------------------------------
-def send_land_target_message():
-    global current_time, H_camera_tag, is_landing_tag_detected, vehicle
-    if is_landing_tag_detected and H_camera_tag is not None and vehicle is not None:
-        x = H_camera_tag[0][3]
-        y = H_camera_tag[1][3]
-        z = H_camera_tag[2][3]
-        if z == 0:
-            return
-        x_offset_rad = m.atan(x / z)
-        y_offset_rad = m.atan(y / z)
-        distance = float(np.sqrt(x * x + y * y + z * z))
-
-        msg = vehicle.message_factory.landing_target_encode(
-            current_time,                       # time target processed (usec)
-            0,                                  # target num
-            mavutil.mavlink.MAV_FRAME_BODY_NED, # frame
-            float(x_offset_rad),                # x angular offset (rad)
-            float(y_offset_rad),                # y angular offset (rad)
-            distance,                           # distance (m)
-            0.0,                                # target x size (rad)
-            0.0,                                # target y size (rad)
-            0.0, 0.0, 0.0,                      # pos on frame (unused)
-            (1,0,0,0),                          # orientation quaternion (w,x,y,z)
-            2,                                  # type: 2 = Fiducial
-            1                                   # position_valid
-        )
-        vehicle.send_mavlink(msg)
-        vehicle.flush()
-
-def send_vision_position_message():
-    global current_time, H_aeroRef_aeroBody, vehicle
-    if H_aeroRef_aeroBody is not None and vehicle is not None:
-        rpy_rad = np.array(tf.euler_from_matrix(H_aeroRef_aeroBody, 'sxyz'))
-        msg = vehicle.message_factory.vision_position_estimate_encode(
-            current_time,
-            float(H_aeroRef_aeroBody[0][3]),
-            float(H_aeroRef_aeroBody[1][3]),
-            float(H_aeroRef_aeroBody[2][3]),
-            float(rpy_rad[0]),
-            float(rpy_rad[1]),
-            float(rpy_rad[2])
-        )
-        vehicle.send_mavlink(msg)
-        vehicle.flush()
-
-def send_confidence_level_dummy_message():
-    global data, current_confidence, vehicle
-    if data is not None and vehicle is not None:
-        print("INFO: Tracking confidence:", pose_data_confidence_level[data.tracker_confidence])
-        msg = vehicle.message_factory.vision_position_delta_encode(
-            0,                  # ts (unused)
-            0,                  # time since last frame
-            [0.0, 0.0, 0.0],    # angle_delta
-            [0.0, 0.0, 0.0],    # position_delta
-            float(data.tracker_confidence * 100 / 3)
-        )
-        vehicle.send_mavlink(msg)
-        vehicle.flush()
-
-        if (current_confidence is None) or (current_confidence != data.tracker_confidence):
-            current_confidence = data.tracker_confidence
-            confidence_status_string = 'Tracking confidence: ' + pose_data_confidence_level[data.tracker_confidence]
-            status_msg = vehicle.message_factory.statustext_encode(
-                3, confidence_status_string.encode()
-            )
-            vehicle.send_mavlink(status_msg)
-            vehicle.flush()
-
-def set_default_global_origin():
-    if vehicle is None:
-        return
-    msg = vehicle.message_factory.set_gps_global_origin_encode(
-        int(vehicle._master.source_system),
-        int(home_lat),
-        int(home_lon),
-        int(home_alt)
-    )
-    vehicle.send_mavlink(msg)
-    vehicle.flush()
-
-def set_default_home_position():
-    if vehicle is None:
-        return
-    x = y = 0
-    z = 0
-    q = [1, 0, 0, 0]   # w x y z
-    approach_x, approach_y, approach_z = 0, 0, 1
-    msg = vehicle.message_factory.set_home_position_encode(
-        int(vehicle._master.source_system),
-        int(home_lat), int(home_lon), int(home_alt),
-        x, y, z,
-        q,
-        approach_x, approach_y, approach_z
-    )
-    vehicle.send_mavlink(msg)
-    vehicle.flush()
-
-def update_timesync(ts=0, tc=0):
-    if vehicle is None:
-        return
-    if ts == 0:
-        ts = int(round(time.time() * 1000))
-    msg = vehicle.message_factory.timesync_encode(tc, ts)
-    vehicle.send_mavlink(msg)
-    vehicle.flush()
-
-def statustext_callback(self, attr_name, value):
-    if value.text in ("GPS Glitch", "GPS Glitch cleared", "EKF2 IMU1 ext nav yaw alignment complete"):
-        time.sleep(0.1)
-        print("INFO: Setting EKF home with default GPS (DELS)")
-        set_default_global_origin()
-        set_default_home_position()
-
-def att_msg_callback(self, attr_name, value):
+def att_msg_callback(value):
     global heading_north_yaw
     heading_north_yaw = value.yaw
     print("INFO: ATTITUDE yaw (deg):", heading_north_yaw * 180.0 / m.pi)
@@ -414,18 +299,54 @@ def scale_update():
             print("WARN: Invalid scale input:", e)
 
 def vehicle_connect():
-    global vehicle
+    global mavlink_connection
     try:
-        vehicle = connect(connection_string, wait_ready=True,
-                          baud=connection_baudrate, source_system=1)
+        mavlink_connection = mavutil.mavlink_connection(
+            connection_string,
+            baud=connection_baudrate,
+            autoreconnect=True,
+            source_system=255,
+            source_component=0
+        )
         return True
     except KeyboardInterrupt:
         print("INFO: KeyboardInterrupt during vehicle_connect")
         shutdown_event.set()
         return False
     except Exception as e:
-        print(f"WARN: Vehicle connection error: {e}. Retrying...")
+        print(f"WARN: MAVLink connection error: {e}. Retrying...")
         return False
+
+def mavlink_receive_loop():
+    """Receive MAVLink messages only (no outbound MAVLink)."""
+    global latest_altitude_m, heading_north_yaw
+    while not shutdown_event.is_set():
+        if mavlink_connection is None:
+            time.sleep(0.1)
+            continue
+        try:
+            msg = mavlink_connection.recv_match(blocking=True, timeout=1)
+        except Exception as e:
+            print(f"WARN: MAVLink receive error: {e}")
+            time.sleep(0.5)
+            continue
+
+        if msg is None:
+            continue
+
+        msg_type = msg.get_type()
+        if msg_type == "GLOBAL_POSITION_INT":
+            try:
+                latest_altitude_m = float(msg.relative_alt) / 1000.0
+            except Exception:
+                continue
+        elif msg_type == "VFR_HUD":
+            try:
+                latest_altitude_m = float(msg.alt)
+            except Exception:
+                continue
+        elif compass_enabled == 1 and msg_type == "ATTITUDE":
+            att_msg_callback(msg)
 
 # ------------------------------
 # RealSense helpers (resilient)
@@ -579,11 +500,10 @@ if shutdown_event.is_set():
     except Exception:
         pass
     sys.exit(0)
-print("INFO: Vehicle connected.")
+print("INFO: MAVLink connection ready (receive-only).")
 
-vehicle.add_message_listener('STATUSTEXT', statustext_callback)
-if compass_enabled == 1:
-    vehicle.add_message_listener('ATTITUDE', att_msg_callback)
+mavlink_rx_thread = threading.Thread(target=mavlink_receive_loop, daemon=True)
+mavlink_rx_thread.start()
 
 data = None
 current_confidence = None
@@ -593,6 +513,7 @@ is_landing_tag_detected = False
 heading_north_yaw = None
 landing_override = False
 last_tag_us = 0
+latest_altitude_m = 0.0
 
 # ------------------------------
 # Performance tracking & dynamic pose rate
@@ -620,148 +541,9 @@ def get_performance_snapshot():
     cpu = psutil.cpu_percent(interval=None) if _HAVE_PSUTIL else None
     return {"loop_dt_ema_s": dt, "loop_fps": loop_fps, "cpu_percent": cpu}
 
-def set_vision_rate(new_hz: float):
-    """
-    Force the VISION_POSITION_ESTIMATE message rate.
-    Can be called at runtime.
-    """
-    global vision_msg_hz, sched
-    try:
-        new_hz = float(new_hz)
-        if new_hz <= 0:
-            raise ValueError("new_hz must be > 0")
-        vision_msg_hz = new_hz
-        interval_s = max(1.0 / vision_msg_hz, 0.001)
-        job = sched.get_job('vision_job')
-        if job is None:
-            sched.add_job(send_vision_position_message, 'interval',
-                          seconds=interval_s, id='vision_job', replace_existing=True)
-        else:
-            sched.reschedule_job('vision_job', trigger='interval', seconds=interval_s)
-        print(f"INFO: Adjusted vision message rate to {vision_msg_hz:.2f} Hz "
-              f"(interval {interval_s*1000:.1f} ms).")
-        return True
-    except Exception as e:
-        print(f"WARN: Failed to set vision message rate: {e}")
-        return False
-
-# Dynamic tuner configuration/state
-_dynamic_cfg = {
-    "enabled": False,
-    "min_hz": 5.0,
-    "max_hz": 50.0,
-    "target_fraction": 0.5,     # aim for 50% of loop FPS
-    "hysteresis": 0.20,          # 20% change required before rescheduling
-    "check_period_s": 2.0,
-    "cpu_high_pct": 85.0,        # if psutil present and above this, bias down
-    "cpu_low_pct": 40.0
-}
-_dynamic_thread = None
-
-def _dynamic_pose_rate_worker():
-    """Background worker that adapts pose publish rate to system performance."""
-    # Prime psutil measurement if available
-    if _HAVE_PSUTIL:
-        _ = psutil.cpu_percent(interval=None)
-
-    while not shutdown_event.is_set():
-        if not _dynamic_cfg["enabled"]:
-            time.sleep(0.2)
-            continue
-
-        snap = get_performance_snapshot()
-        dt = snap["loop_dt_ema_s"]
-        loop_fps = snap["loop_fps"]
-        cpu = snap["cpu_percent"]
-
-        if dt is None or loop_fps is None or loop_fps <= 0:
-            time.sleep(_dynamic_cfg["check_period_s"])
-            continue
-
-        # Base target from loop capacity
-        target = loop_fps * float(_dynamic_cfg["target_fraction"])
-
-        # Apply CPU bias if psutil is available
-        if _HAVE_PSUTIL and cpu is not None:
-            if cpu >= _dynamic_cfg["cpu_high_pct"]:
-                target *= 0.75  # back off 25% under high CPU
-            elif cpu <= _dynamic_cfg["cpu_low_pct"]:
-                target *= 1.10  # gently increase 10% if CPU is cool
-
-        # Clamp within bounds
-        target_hz = max(float(_dynamic_cfg["min_hz"]), min(float(_dynamic_cfg["max_hz"]), float(target)))
-
-        current_hz = float(vision_msg_hz)
-        # Avoid thrashing with hysteresis band
-        if current_hz <= 0 or abs(target_hz - current_hz) / current_hz >= float(_dynamic_cfg["hysteresis"]):
-            set_vision_rate(target_hz)
-            print(f"INFO: Dynamic pose rate tuner -> loop_fps={loop_fps:.1f} Hz,"
-                  f" cpu={('%.0f%%' % cpu) if cpu is not None else 'n/a'},"
-                  f" new vision_msg_hz={target_hz:.1f}")
-
-        time.sleep(float(_dynamic_cfg["check_period_s"]))
-
-def set_dynamic_pose_rate(enable: bool,
-                          min_hz: float = 5.0,
-                          max_hz: float = 50.0,
-                          target_fraction: float = 0.5,
-                          hysteresis: float = 0.20,
-                          check_period_s: float = 2.0,
-                          cpu_high_pct: float = 85.0,
-                          cpu_low_pct: float = 40.0):
-    """
-    Enable/disable dynamic tuning of VISION_POSITION_ESTIMATE rate based on system performance.
-
-    Args:
-        enable: True to start/continue tuning, False to pause.
-        min_hz, max_hz: Lower and upper bounds for the publish rate.
-        target_fraction: Desired fraction of loop FPS to use for vision publishing.
-        hysteresis: Fractional change required before rescheduling to avoid oscillation.
-        check_period_s: How often to re-evaluate and adjust.
-        cpu_high_pct, cpu_low_pct: Optional CPU thresholds (if psutil installed) to bias the target.
-
-    Usage:
-        set_dynamic_pose_rate(True, min_hz=10, max_hz=40, target_fraction=0.6)
-        set_dynamic_pose_rate(False)   # to stop auto-tuning
-    """
-    global _dynamic_thread
-    _dynamic_cfg.update({
-        "enabled": bool(enable),
-        "min_hz": float(min_hz),
-        "max_hz": float(max_hz),
-        "target_fraction": float(target_fraction),
-        "hysteresis": float(hysteresis),
-        "check_period_s": float(check_period_s),
-        "cpu_high_pct": float(cpu_high_pct),
-        "cpu_low_pct": float(cpu_low_pct),
-    })
-    print("INFO: Dynamic pose rate config set:", _dynamic_cfg)
-
-    # Spawn worker if needed
-    if (_dynamic_thread is None) or (not _dynamic_thread.is_alive()):
-        _dynamic_thread = threading.Thread(target=_dynamic_pose_rate_worker, daemon=True)
-        _dynamic_thread.start()
-        print("INFO: Dynamic pose rate worker started.")
-
-# ------------------------------
-# Background jobs (with IDs for reschedule)
-# ------------------------------
-sched = BackgroundScheduler()
-sched.add_job(send_vision_position_message, 'interval',
-              seconds=max(1.0/vision_msg_hz, 0.001), id='vision_job', replace_existing=True)
-sched.add_job(send_confidence_level_dummy_message, 'interval',
-              seconds=max(1.0/confidence_msg_hz, 0.001), id='confidence_job', replace_existing=True)
-sched.add_job(send_land_target_message, 'interval',
-              seconds=max(1.0/landing_target_msg_hz, 0.001), id='landing_job', replace_existing=True)
-
 if scale_calib_enable:
     scale_update_thread = threading.Thread(target=scale_update, daemon=True)
     scale_update_thread.start()
-
-sched.start()
-
-if compass_enabled == 1:
-    time.sleep(1.0)
 
 print("INFO: Starting main loop...")
 
@@ -865,12 +647,7 @@ try:
             continue
 
         if legacy_mode:
-            alt = 0.0
-            if vehicle is not None:
-                try:
-                    alt = vehicle.location.global_relative_frame.alt or 0.0
-                except Exception:
-                    alt = 0.0
+            alt = latest_altitude_m
 
             now_us = int(round(time.time() * 1e6))
             if landing_override and now_us - last_tag_us > legacy_tag_lost_us:
@@ -933,18 +710,14 @@ except Exception as e:
     print("ERROR:", e)
 finally:
     try:
-        sched.shutdown(wait=False)
-    except Exception:
-        pass
-    try:
         if pipe is not None:
             pipe.stop()
     except Exception:
         pass
     try:
-        if vehicle is not None:
-            vehicle.close()
+        if mavlink_connection is not None:
+            mavlink_connection.close()
     except Exception:
         pass
-    print("INFO: RealSense pipeline and vehicle closed. Exiting.")
+    print("INFO: RealSense pipeline and MAVLink connection closed. Exiting.")
     sys.exit(0)
