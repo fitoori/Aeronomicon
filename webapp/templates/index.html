@@ -49,6 +49,18 @@
       </p>
     </div>
 
+    <div class="reboot-screen shutdown-screen hidden" id="shutdown-screen" aria-live="polite" aria-hidden="true">
+      <img
+        src="{{ url_for('static', filename='img/onics-seal.svg') }}"
+        alt="Wireless Autonomous Terrestrial Navigation Experiment seal"
+        class="loading-logo"
+      />
+      <p class="loading-title shutdown-title">
+        VEHICLE SHUTDOWN HAS BEEN INITIATED, THE REMOTE CONSOLE HAS ENTERED A CONTROLLED END-STATE.
+        PLEASE REBOOT THIS DEVICE ONCE THE VEHICLE HAS BEEN REACTIVATED.
+      </p>
+    </div>
+
     <div class="modal" id="login-modal" aria-hidden="true">
       <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="login-title">
         <h2 id="login-title">SSH Login Required</h2>
@@ -104,6 +116,12 @@
               </button>
               <button class="menu-action" type="button" id="shutdown-btn">
                 Shutdown vehicle
+              </button>
+              <button class="menu-action" type="button" id="host-reboot-btn">
+                Restart host device
+              </button>
+              <button class="menu-action" type="button" id="host-shutdown-btn">
+                Shutdown host device
               </button>
               <button
                 class="menu-action menu-action--neutral"
