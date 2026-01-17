@@ -1,7 +1,8 @@
 {
   "name": "ONICS Remote Console",
   "short_name": "ONICS Console",
-  "start_url": ".",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0a120f",
   "theme_color": "#0a120f",
