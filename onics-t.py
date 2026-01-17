@@ -239,7 +239,7 @@ def create_apriltag_detector():
 at_detector = None
 legacy_detector = None
 if legacy_mode:
-    legacy_detector = apriltags3.Detector(families=APRILTAG_FAMILY)
+    legacy_detector = create_apriltag_detector()
 else:
     at_detector = create_apriltag_detector()
 
@@ -880,7 +880,9 @@ try:
             # ---- April-Tag detection up to 10 m
             H_camera_tag = None
             is_landing_tag_detected = False
-            if alt <= legacy_tag_max_alt:
+            if legacy_detector is None:
+                print("WARN: Legacy AprilTag detector unavailable; skipping detection.")
+            elif alt <= legacy_tag_max_alt:
                 img = frames.get_fisheye_frame(2)
                 if img:
                     tags = legacy_detector.detect(np.asanyarray(img.get_data()),
