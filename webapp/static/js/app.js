@@ -124,7 +124,6 @@ function setRebootOverlay(visible) {
   }
   rebootScreen.classList.toggle("hidden", !visible);
   rebootScreen.setAttribute("aria-hidden", visible ? "false" : "true");
-  document.body.classList.toggle("is-rebooting", visible);
 }
 
 function setShutdownOverlay(visible) {
@@ -133,7 +132,10 @@ function setShutdownOverlay(visible) {
   }
   shutdownScreen.classList.toggle("hidden", !visible);
   shutdownScreen.setAttribute("aria-hidden", visible ? "false" : "true");
-  document.body.classList.toggle("is-rebooting", visible);
+}
+
+function updateRebootingState() {
+  document.body.classList.toggle("is-rebooting", rebootPending || shutdownPending);
 }
 
 function setLteBanner(active) {
@@ -964,6 +966,7 @@ function updateSnapshot(snapshot, options = {}) {
   }
   setRebootOverlay(rebootPending);
   setShutdownOverlay(shutdownPending);
+  updateRebootingState();
   connectionPill.textContent = health.los
     ? "LINK: LOS"
     : linkDegraded
@@ -1342,6 +1345,7 @@ rebootBtn?.addEventListener("click", async () => {
     rebootPending = true;
     rebootAwaitingLoss = true;
     setRebootOverlay(true);
+    updateRebootingState();
     updateSnapshot(data.snapshot);
     appendLog("VEHICLE RESTART REQUESTED: reboot now");
   } catch (err) {
@@ -1366,6 +1370,7 @@ shutdownBtn?.addEventListener("click", async () => {
     const data = await sendCommand("/api/shutdown");
     shutdownPending = true;
     setShutdownOverlay(true);
+    updateRebootingState();
     updateSnapshot(data.snapshot);
     appendLog("VEHICLE SHUTDOWN REQUESTED: shutdown now");
   } catch (err) {
@@ -1534,6 +1539,7 @@ if (!isLoadOnly) {
     if (shutdownPending) {
       setShutdownOverlay(true);
     }
+    updateRebootingState();
   };
 }
 
